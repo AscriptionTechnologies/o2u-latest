@@ -1,0 +1,71 @@
+{
+  "expo": {
+    "name": "Only2U",
+    "slug": "only2u",
+    "version": "1.0.1",
+    "scheme": "only2u",
+    "platforms": ["ios", "android"],
+    "web": {
+      "favicon": "./assets/icon.png"
+    },
+    "experiments": {
+      "tsconfigPaths": true
+    },
+    "plugins": [
+      "expo-dev-client",
+      "expo-image-picker",
+      "expo-av"
+    ],
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.only2u.only2u",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSPhotoLibraryUsageDescription": "This app needs access to your photo library to allow you to select and upload images for face swap and product customization features.",
+        "NSMicrophoneUsageDescription": "This app needs access to your microphone for voice commands and audio input during video recording and face swap features.",
+        "NSSpeechRecognitionUsageDescription": "This app uses speech recognition to enable voice commands and improve accessibility for hands-free navigation and product search."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "package": "com.only2u.only2u",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE"
+      ],
+      "usesCleartextTraffic": true,
+      "compileSdkVersion": 34,
+      "targetSdkVersion": 34,
+      "buildToolsVersion": "34.0.0",
+      "proguard": {
+        "enabled": true
+      }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "23280bb9-6b62-412f-a55b-292d7738e440"
+      }
+    },
+    "owner": "nischalrapireddy-2"
+  }
+}
+
