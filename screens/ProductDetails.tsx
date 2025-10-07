@@ -1993,10 +1993,10 @@ const ProductDetails = () => {
             <TouchableOpacity style={styles.closeButton} onPress={() => setShowConsentModal(false)}>
               <Ionicons name="close" size={24} color="#333" />
             </TouchableOpacity>
-            <Text style={styles.akoolTitle}>Kling AI Consent</Text>
+            <Text style={styles.akoolTitle}>Only2U Consent</Text>
             <Text style={styles.akoolSubtitle}>
               By proceeding, you confirm you have the right to use your image and consent to
-              processing by Kling AI to generate virtual try-on previews. Generated previews may
+              processing by Only2U to generate virtual try-on previews. Generated previews may
               be stored to improve your experience.
             </Text>
             <View style={{ height: 8 }} />
@@ -2035,7 +2035,7 @@ const ProductDetails = () => {
               <Ionicons name="close" size={24} color="#333" />
             </TouchableOpacity>
             <Text style={styles.akoolTitle}>👗 Want to see how this outfit looks on you?</Text>
-            <Text style={styles.akoolSubtitle}>Try on with Virtual Try-On AI</Text>
+            <Text style={styles.akoolSubtitle}>Try on with Only2U Virtual Try-On AI</Text>
             <View style={styles.akoolOptions}>
               <TouchableOpacity
                 style={[

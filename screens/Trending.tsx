@@ -160,6 +160,8 @@ const TrendingScreen = () => {
   const [productForDetails, setProductForDetails] = useState<Product | null>(null);
   const [showSavedPopup, setShowSavedPopup] = useState(false);
   const [savedProductName, setSavedProductName] = useState('');
+  const [showUGCActionsSheet, setShowUGCActionsSheet] = useState(false);
+  const [ugcActionProductId, setUGCActionProductId] = useState<string | null>(null);
   const popupAnimation = useRef(new Animated.Value(0)).current;
 
   const { t } = useTranslation();
@@ -175,6 +177,7 @@ const TrendingScreen = () => {
   const [videoLoadingStates, setVideoLoadingStates] = useState<{ [productId: string]: boolean }>({});
 
   const commentsSheetRef = useRef<BottomSheet>(null);
+  const ugcActionsSheetRef = useRef<BottomSheet>(null);
   const snapPoints = useMemo(() => ['50%', '70%'], []);
 
   const getUserPrice = useCallback((product: Product) => {
@@ -1267,6 +1270,20 @@ const TrendingScreen = () => {
             </View>
             <Text style={styles.modernActionText}>Share</Text>
           </TouchableOpacity>
+
+          {/* 3-dot menu for UGC actions */}
+          <TouchableOpacity
+            style={styles.modernActionButton}
+            onPress={() => {
+              setUGCActionProductId(product.id);
+              ugcActionsSheetRef.current?.expand();
+            }}
+          >
+            <View style={styles.actionIconCircle}>
+              <Ionicons name="ellipsis-horizontal" size={24} color="#fff" />
+            </View>
+            <Text style={styles.modernActionText}>More</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Bottom content with improved layout */}
@@ -1283,25 +1300,26 @@ const TrendingScreen = () => {
                 style={styles.modernVendorAvatar}
               />
               <View style={styles.modernVendorTextCol}>
-                <Text style={styles.modernVendorHandle}>{vendorHandle}</Text>
+                <View style={styles.vendorNameFollowRow}>
+                  <Text style={styles.modernVendorHandle}>{vendorHandle}</Text>
+                  {vendor && (
+                    <TouchableOpacity
+                      style={[
+                        styles.compactFollowButton,
+                        isFollowingVendorSafe(vendor.id) && styles.compactFollowingButton
+                      ]}
+                      onPress={() => handleFollowVendor(vendor.id)}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={styles.compactFollowText}>
+                        {isFollowingVendorSafe(vendor.id) ? 'Following' : 'Follow'}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
                 <Text style={styles.modernProductName} numberOfLines={1}>{product.name}</Text>
               </View>
             </TouchableOpacity>
-            
-            {vendor && (
-              <TouchableOpacity
-                style={[
-                  styles.modernFollowButton,
-                  isFollowingVendorSafe(vendor.id) && styles.modernFollowingButton
-                ]}
-                onPress={() => handleFollowVendor(vendor.id)}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.modernFollowText}>
-                  {isFollowingVendorSafe(vendor.id) ? 'Following' : 'Follow'}
-                </Text>
-              </TouchableOpacity>
-            )}
           </View>
 
           {/* Price and Rating Row */}
@@ -1871,6 +1889,148 @@ const TrendingScreen = () => {
           </View>
         </Animated.View>
       )}
+
+      {/* UGC Actions Bottom Sheet */}
+      <BottomSheet
+        ref={ugcActionsSheetRef}
+        index={-1}
+        snapPoints={['40%', '50%']}
+        enablePanDownToClose={true}
+        backgroundStyle={{ backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20 }}
+        handleIndicatorStyle={{ backgroundColor: '#ccc' }}
+      >
+        <View style={styles.ugcActionsContainer}>
+          <View style={styles.ugcActionsHeader}>
+            <Text style={styles.ugcActionsTitle}>Actions</Text>
+            <TouchableOpacity onPress={() => ugcActionsSheetRef.current?.close()}>
+              <Ionicons name="close" size={24} color="#333" />
+            </TouchableOpacity>
+          </View>
+
+          {/* Report */}
+          <TouchableOpacity
+            style={styles.ugcActionItem}
+            onPress={async () => {
+              try {
+                if (ugcActionProductId) {
+                  await supabase.from('ugc_reports').insert({
+                    reporter_id: userData?.id || null,
+                    product_id: ugcActionProductId,
+                    reason: 'inappropriate',
+                  });
+                  Toast.show({ 
+                    type: 'success', 
+                    text1: 'Reported', 
+                    text2: 'Thanks for keeping Only2U safe.' 
+                  });
+                  ugcActionsSheetRef.current?.close();
+                }
+              } catch (error) {
+                Toast.show({ type: 'error', text1: 'Error', text2: 'Failed to report' });
+              }
+            }}
+          >
+            <View style={styles.ugcActionIconContainer}>
+              <Ionicons name="flag" size={22} color="#EF4444" />
+            </View>
+            <View style={styles.ugcActionTextContainer}>
+              <Text style={styles.ugcActionTitle}>Report</Text>
+              <Text style={styles.ugcActionSubtitle}>Report this content</Text>
+            </View>
+          </TouchableOpacity>
+
+          {/* Not Interested */}
+          <TouchableOpacity
+            style={styles.ugcActionItem}
+            onPress={() => {
+              if (ugcActionProductId) {
+                Toast.show({ 
+                  type: 'success', 
+                  text1: 'Noted', 
+                  text2: "We'll show you less like this" 
+                });
+                ugcActionsSheetRef.current?.close();
+              }
+            }}
+          >
+            <View style={styles.ugcActionIconContainer}>
+              <Ionicons name="eye-off" size={22} color="#6B7280" />
+            </View>
+            <View style={styles.ugcActionTextContainer}>
+              <Text style={styles.ugcActionTitle}>Not Interested</Text>
+              <Text style={styles.ugcActionSubtitle}>See fewer posts like this</Text>
+            </View>
+          </TouchableOpacity>
+
+          {/* Block User */}
+          <TouchableOpacity
+            style={styles.ugcActionItem}
+            onPress={async () => {
+              try {
+                const product = products.find(p => p.id === ugcActionProductId);
+                if (product && userData?.id) {
+                  const vendor = productVendors[product.id];
+                  if (vendor) {
+                    await supabase.from('blocked_users').insert({
+                      blocker_id: userData.id,
+                      blocked_id: vendor.id,
+                    });
+                    setBlockedUserIds([...blockedUserIds, vendor.id]);
+                    Toast.show({ 
+                      type: 'success', 
+                      text1: 'Blocked', 
+                      text2: 'You won\'t see content from this user' 
+                    });
+                    ugcActionsSheetRef.current?.close();
+                  }
+                }
+              } catch (error) {
+                Toast.show({ type: 'error', text1: 'Error', text2: 'Failed to block user' });
+              }
+            }}
+          >
+            <View style={styles.ugcActionIconContainer}>
+              <Ionicons name="ban" size={22} color="#DC2626" />
+            </View>
+            <View style={styles.ugcActionTextContainer}>
+              <Text style={styles.ugcActionTitle}>Block User</Text>
+              <Text style={styles.ugcActionSubtitle}>Block this vendor</Text>
+            </View>
+          </TouchableOpacity>
+
+          {/* Share to... */}
+          <TouchableOpacity
+            style={styles.ugcActionItem}
+            onPress={async () => {
+              try {
+                const product = products.find(p => p.id === ugcActionProductId);
+                if (product) {
+                  const shareUrl = product.image_urls?.[0] || '';
+                  if (shareUrl) {
+                    Clipboard.setString(shareUrl);
+                    Toast.show({ 
+                      type: 'success', 
+                      text1: 'Link Copied', 
+                      text2: 'Share link copied to clipboard' 
+                    });
+                  }
+                  ugcActionsSheetRef.current?.close();
+                }
+              } catch (error) {
+                Toast.show({ type: 'error', text1: 'Error', text2: 'Failed to copy link' });
+              }
+            }}
+          >
+            <View style={styles.ugcActionIconContainer}>
+              <Ionicons name="share-social" size={22} color="#3B82F6" />
+            </View>
+            <View style={styles.ugcActionTextContainer}>
+              <Text style={styles.ugcActionTitle}>Share to...</Text>
+              <Text style={styles.ugcActionSubtitle}>Share via other apps</Text>
+            </View>
+          </TouchableOpacity>
+        </View>
+      </BottomSheet>
     </View>
   );
 };
@@ -2074,6 +2234,28 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     letterSpacing: 0.5,
+  },
+  vendorNameFollowRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  compactFollowButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 5,
+    borderRadius: 16,
+    backgroundColor: '#F53F7A',
+  },
+  compactFollowingButton: {
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.5)',
+  },
+  compactFollowText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.3,
   },
   modernPriceRow: {
     flexDirection: 'row',
@@ -2914,6 +3096,54 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginBottom: 4,
     textAlign: 'center',
+  },
+  // UGC Actions Bottom Sheet Styles
+  ugcActionsContainer: {
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+  },
+  ugcActionsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  ugcActionsTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#111',
+  },
+  ugcActionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+  },
+  ugcActionIconContainer: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#F9FAFB',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 16,
+  },
+  ugcActionTextContainer: {
+    flex: 1,
+  },
+  ugcActionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#111',
+    marginBottom: 2,
+  },
+  ugcActionSubtitle: {
+    fontSize: 13,
+    color: '#6B7280',
   },
   // Vendor styles
   vendorInfo: {

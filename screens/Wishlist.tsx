@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, FlatList, SafeAreaView, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, FlatList, SafeAreaView, Dimensions, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useWishlist } from '~/contexts/WishlistContext';
@@ -11,6 +11,14 @@ import { useTranslation } from 'react-i18next';
 import { getFirstSafeImageUrl, getProductImages, getFirstSafeProductImage, preferApiRenderedImageFirst, getSafeImageUrl } from '../utils/imageUtils';
 
 const { width } = Dimensions.get('window');
+
+interface Collection {
+  id: string;
+  name: string;
+  is_private: boolean;
+  item_count: number;
+  cover_images: string[]; // Array of up to 4 image URLs for the folder cover
+}
 
 // Notifications come from context now
 
@@ -29,6 +37,8 @@ const Wishlist = () => {
   });
   const { t } = useTranslation();
   const [productCollections, setProductCollections] = React.useState<{ [productId: string]: string }>({});
+  const [collections, setCollections] = React.useState<Collection[]>([]);
+  const [loadingCollections, setLoadingCollections] = React.useState(false);
 
   // Handle route param changes
   React.useEffect(() => {
@@ -41,30 +51,91 @@ const Wishlist = () => {
     }
   }, [(route.params as any)?.notifications, (route.params as any)?.preview]);
 
-  // Fetch collection name for each wishlist product
+  // Fetch collections with cover images
   React.useEffect(() => {
-    const fetchCollections = async () => {
-      if (!userData?.id || wishlist.length === 0) return;
-      // Get all collection_products for this user
-      const { data: collectionProducts, error } = await supabase
-        .from('collection_products')
-        .select('product_id, collection_id');
-      if (error || !collectionProducts) return;
-      // Get all collections for this user
-      const { data: collections, error: colError } = await supabase
-        .from('collections')
-        .select('id, name')
-        .eq('user_id', userData.id);
-      if (colError || !collections) return;
-      // Map productId -> collection name
-      const map: { [productId: string]: string } = {};
-      collectionProducts.forEach((cp: any) => {
-        const col = collections.find((c: any) => c.id === cp.collection_id);
-        if (col) map[cp.product_id] = col.name;
-      });
-      setProductCollections(map);
+    const fetchCollectionsWithCovers = async () => {
+      if (!userData?.id) return;
+      
+      setLoadingCollections(true);
+      try {
+        // Get all collections for this user
+        const { data: collectionsData, error: colError } = await supabase
+          .from('collections')
+          .select('id, name, is_private')
+          .eq('user_id', userData.id)
+          .order('created_at', { ascending: false });
+
+        if (colError || !collectionsData) {
+          setLoadingCollections(false);
+          return;
+        }
+
+        // For each collection, get the first 4 product images for cover
+        const collectionsWithCovers = await Promise.all(
+          collectionsData.map(async (col: any) => {
+            // Get total count of items in collection
+            const { count: totalCount } = await supabase
+              .from('collection_products')
+              .select('*', { count: 'exact', head: true })
+              .eq('collection_id', col.id);
+
+            // Get first 4 product IDs for cover images
+            const { data: collectionProducts } = await supabase
+              .from('collection_products')
+              .select('product_id')
+              .eq('collection_id', col.id)
+              .limit(4);
+
+            const cover_images: string[] = [];
+
+            if (collectionProducts && collectionProducts.length > 0) {
+              const productIds = collectionProducts.map((cp: any) => cp.product_id);
+              const { data: products } = await supabase
+                .from('products')
+                .select('image_urls')
+                .in('id', productIds)
+                .limit(4);
+
+              if (products) {
+                products.forEach((p: any) => {
+                  const img = getFirstSafeProductImage(p);
+                  if (img) cover_images.push(img);
+                });
+              }
+            }
+
+            return {
+              id: col.id,
+              name: col.name,
+              is_private: col.is_private,
+              item_count: totalCount || 0,
+              cover_images: cover_images.slice(0, 4),
+            };
+          })
+        );
+
+        setCollections(collectionsWithCovers);
+
+        // Also build the product -> collection map for individual products view
+        const { data: collectionProducts, error } = await supabase
+          .from('collection_products')
+          .select('product_id, collection_id');
+        if (!error && collectionProducts) {
+          const map: { [productId: string]: string } = {};
+          collectionProducts.forEach((cp: any) => {
+            const col = collectionsData.find((c: any) => c.id === cp.collection_id);
+            if (col) map[cp.product_id] = col.name;
+          });
+          setProductCollections(map);
+        }
+      } catch (error) {
+        console.error('Error fetching collections:', error);
+      } finally {
+        setLoadingCollections(false);
+      }
     };
-    fetchCollections();
+
+    fetchCollectionsWithCovers();
   }, [userData?.id, wishlist]);
 
   // Real counts for badges
@@ -101,6 +172,66 @@ const Wishlist = () => {
       </View>
     </TouchableOpacity>
   );
+
+  // Render collection folder (Instagram-style)
+  const renderCollectionFolder = ({ item }: { item: Collection }) => {
+    const folderSize = (width - 48) / 2; // 2 columns with padding
+    
+    return (
+      <TouchableOpacity
+        style={[styles.collectionFolder, { width: folderSize }]}
+        onPress={() => {
+          (navigation as any).navigate('CollectionDetails', { collection: item });
+        }}
+        activeOpacity={0.8}
+      >
+        {/* Folder Cover - Grid of up to 4 images */}
+        <View style={styles.folderCover}>
+          {item.cover_images.length === 0 ? (
+            // Empty folder
+            <View style={styles.emptyFolderCover}>
+              <Ionicons name="folder-outline" size={48} color="#ccc" />
+            </View>
+          ) : item.cover_images.length === 1 ? (
+            // Single image
+            <Image source={{ uri: item.cover_images[0] }} style={styles.singleCoverImage} />
+          ) : (
+            // Grid of 2-4 images
+            <View style={styles.gridCoverContainer}>
+              {item.cover_images.slice(0, 4).map((imageUrl, index) => (
+                <Image
+                  key={index}
+                  source={{ uri: imageUrl }}
+                  style={[
+                    styles.gridCoverImage,
+                    item.cover_images.length === 2 && styles.gridCoverImageHalf,
+                    item.cover_images.length >= 3 && styles.gridCoverImageQuarter,
+                  ]}
+                />
+              ))}
+            </View>
+          )}
+          
+          {/* Private Lock Icon */}
+          {item.is_private && (
+            <View style={styles.privateBadge}>
+              <Ionicons name="lock-closed" size={12} color="#fff" />
+            </View>
+          )}
+        </View>
+
+        {/* Folder Info */}
+        <View style={styles.folderInfo}>
+          <Text style={styles.folderName} numberOfLines={1}>
+            {item.name}
+          </Text>
+          <Text style={styles.folderCount}>
+            {item.item_count} {item.item_count === 1 ? 'item' : 'items'}
+          </Text>
+        </View>
+      </TouchableOpacity>
+    );
+  };
 
   const renderWishlistItem = ({ item }: any) => (
     <TouchableOpacity 
@@ -268,25 +399,64 @@ const Wishlist = () => {
     switch (activeTab) {
       case 'wishlist':
         const regularWishlistItems = wishlistSafe.filter(item => !item.isPersonalized);
-        return regularWishlistItems.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <View style={styles.emptyIconContainer}>
-              <Ionicons name="heart-outline" size={80} color="#F53F7A" />
+        
+        if (loadingCollections) {
+          return (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color="#F53F7A" />
+              <Text style={styles.loadingText}>Loading collections...</Text>
             </View>
-            <Text style={styles.emptyTitle}>{t('no_wishlist_items') || 'Your wishlist is empty'}</Text>
-            <Text style={styles.emptySubtitle}>{t('add_products_to_wishlist') || 'Start saving your favorite products to see them here'}</Text>
-            <TouchableOpacity 
-              style={styles.emptyActionButton}
-              onPress={() => (navigation as any).navigate('Home', { screen: 'Dashboard' })}
-            >
-              <Text style={styles.emptyActionButtonText}>Start Shopping</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
+          );
+        }
+        
+        if (collections.length === 0 && regularWishlistItems.length === 0) {
+          return (
+            <View style={styles.emptyContainer}>
+              <View style={styles.emptyIconContainer}>
+                <Ionicons name="heart-outline" size={80} color="#F53F7A" />
+              </View>
+              <Text style={styles.emptyTitle}>{t('no_wishlist_items') || 'Your wishlist is empty'}</Text>
+              <Text style={styles.emptySubtitle}>{t('add_products_to_wishlist') || 'Start saving your favorite products to see them here'}</Text>
+              <TouchableOpacity 
+                style={styles.emptyActionButton}
+                onPress={() => (navigation as any).navigate('Home', { screen: 'Dashboard' })}
+              >
+                <Text style={styles.emptyActionButtonText}>Start Shopping</Text>
+              </TouchableOpacity>
+            </View>
+          );
+        }
+        
+        return (
           <FlatList
             data={regularWishlistItems}
             renderItem={renderWishlistItem}
             keyExtractor={item => item.id}
+            ListHeaderComponent={() => (
+              collections.length > 0 ? (
+                <View style={styles.collectionsSection}>
+                  <View style={styles.sectionHeader}>
+                    <Ionicons name="folder" size={20} color="#333" />
+                    <Text style={styles.sectionTitle}>Collections</Text>
+                    <Text style={styles.sectionCount}>({collections.length})</Text>
+                  </View>
+                  <FlatList
+                    data={collections}
+                    renderItem={renderCollectionFolder}
+                    keyExtractor={item => item.id}
+                    numColumns={2}
+                    scrollEnabled={false}
+                    contentContainerStyle={styles.collectionsList}
+                  />
+                  {regularWishlistItems.length > 0 && (
+                    <View style={styles.allItemsHeader}>
+                      <Ionicons name="grid" size={18} color="#666" />
+                      <Text style={styles.allItemsTitle}>All Items</Text>
+                    </View>
+                  )}
+                </View>
+              ) : null
+            )}
             contentContainerStyle={styles.productList}
             numColumns={2}
             showsVerticalScrollIndicator={false}
@@ -729,6 +899,129 @@ const styles = StyleSheet.create({
   },
   previewDeleteButton: {
     padding: 8,
+  },
+  
+  // Collections Section Styles
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 14,
+    color: '#666',
+  },
+  collectionsSection: {
+    width: '100%',
+    marginBottom: 16,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    gap: 8,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#333',
+  },
+  sectionCount: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '600',
+  },
+  collectionsList: {
+    paddingHorizontal: 4,
+  },
+  collectionFolder: {
+    margin: 8,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
+  },
+  folderCover: {
+    width: '100%',
+    aspectRatio: 1,
+    position: 'relative',
+    backgroundColor: '#f5f5f5',
+  },
+  emptyFolderCover: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#fafafa',
+  },
+  singleCoverImage: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
+  },
+  gridCoverContainer: {
+    width: '100%',
+    height: '100%',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  gridCoverImage: {
+    resizeMode: 'cover',
+    borderWidth: 0.5,
+    borderColor: '#fff', // White border between images
+  },
+  gridCoverImageHalf: {
+    width: '50%',
+    height: '100%',
+  },
+  gridCoverImageQuarter: {
+    width: '50%',
+    height: '50%',
+  },
+  privateBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    borderRadius: 12,
+    padding: 6,
+  },
+  folderInfo: {
+    padding: 12,
+    backgroundColor: '#fff',
+  },
+  folderName: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 4,
+  },
+  folderCount: {
+    fontSize: 13,
+    color: '#666',
+  },
+  allItemsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+    marginTop: 8,
+    gap: 8,
+  },
+  allItemsTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#666',
   },
 });
 

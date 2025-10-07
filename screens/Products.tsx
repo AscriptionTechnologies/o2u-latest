@@ -34,12 +34,13 @@ import OverlayLabel from '~/components/overlay';
 import { ImageBackground } from 'expo-image';
 import { ResizeMode, Video } from 'expo-av';
 import { LinearGradient } from 'expo-linear-gradient';
+import Toast from 'react-native-toast-message';
 
 // Get screen dimensions
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
 // cardHeight constant for backward compatibility - increased for better visibility
-const cardHeight = Math.min(screenHeight * 0.70, 520); // 70% of screen height, max 520
+const cardHeight = Math.min(screenHeight * 0.92, 750); // 92% of screen height, max 750 - extended to bottom
 // Export cardHeight for external use
 export { cardHeight };
 interface Category {
@@ -513,44 +514,50 @@ const createSwipeCardStyles = (cardHeight: number, cardIndex: number = 0) => {
   // Different shadow intensities and scales based on card position in stack
   const shadowIntensity = Math.max(0.1, 0.4 - (cardIndex * 0.15));
   const elevationIntensity = Math.max(5, 30 - (cardIndex * 12));
-  const scaleValue = Math.max(0.8, 1 - (cardIndex * 0.1)); // More aggressive scaling for better visibility
-  const translateY = cardIndex * 8; // More vertical offset for each card
+  const scaleValue = Math.max(0.8, 1 - (cardIndex * 0.1));
+  const translateY = cardIndex * 8;
   
   return {
     swipeCardContainer: {
-      width: screenWidth - 32, // More margin for Tinder-like feel
+      width: screenWidth - 32,
       height: cardHeight,
-      borderRadius: 20, // More rounded corners like Tinder
-      backgroundColor: cardIndex === 0 ? '#fff' : cardIndex === 1 ? '#f5f5f5' : '#eeeeee', // More distinct backgrounds for stacked cards
-      shadowColor: '#000',
-      shadowOpacity: shadowIntensity, // Dynamic shadow based on card position
-      shadowRadius: 30,
-      shadowOffset: { width: 0, height: 20 },
-      elevation: elevationIntensity, // Dynamic elevation based on card position
-      overflow: 'hidden' as const,
-      alignSelf: 'center' as const, // Center the card
+      borderRadius: 28,
+      backgroundColor: cardIndex === 0 ? '#fff' : cardIndex === 1 ? '#f5f5f5' : '#eeeeee',
+      shadowColor: cardIndex === 0 ? '#F53F7A' : '#000',
+      shadowOpacity: cardIndex === 0 ? 0.6 : shadowIntensity,
+      shadowRadius: cardIndex === 0 ? 45 : 30,
+      shadowOffset: { width: 0, height: cardIndex === 0 ? 25 : 20 },
+      elevation: elevationIntensity,
+      overflow: 'visible' as const,
+      alignSelf: 'center' as const,
       borderWidth: 1,
-      borderColor: cardIndex === 0 ? 'rgba(0, 0, 0, 0.05)' : cardIndex === 1 ? 'rgba(0, 0, 0, 0.15)' : 'rgba(0, 0, 0, 0.2)', // More distinct borders for stacked cards
+      borderColor: cardIndex === 0 ? 'rgba(245, 63, 122, 0.15)' : cardIndex === 1 ? 'rgba(0, 0, 0, 0.15)' : 'rgba(0, 0, 0, 0.2)',
       transform: [
         { scale: scaleValue },
         { translateY: translateY }
       ],
     },
+    swipeCardInner: {
+      borderRadius: 28,
+      overflow: 'hidden' as const,
+      backgroundColor: '#fff',
+      height: cardHeight, // Fixed height
+    },
     swipeImageContainer: {
-      height: cardHeight * 0.68, // Adjusted for better balance
+      height: cardHeight * 0.70, // Increased to 70% for vertical card
       position: 'relative' as const,
-      borderTopLeftRadius: 20,
-      borderTopRightRadius: 20,
+      borderTopLeftRadius: 28,
+      borderTopRightRadius: 28,
       overflow: 'hidden' as const,
     },
     swipeImageBackground: {
       width: screenWidth - 32,
-      height: cardHeight * 0.68,
+      height: cardHeight * 0.70,
       justifyContent: 'flex-end' as const,
     },
     swipeVideoStyle: {
       width: screenWidth - 32,
-      height: cardHeight * 0.68,
+      height: cardHeight * 0.70,
     },
     swipeImageGradient: {
       position: 'absolute' as const,
@@ -561,17 +568,12 @@ const createSwipeCardStyles = (cardHeight: number, cardIndex: number = 0) => {
     },
     swipeInfoPanel: {
       backgroundColor: '#fff',
-      paddingHorizontal: 16,
-      paddingVertical: 16,
-      borderBottomLeftRadius: 20,
-      borderBottomRightRadius: 20,
-      shadowColor: '#000',
-      shadowOpacity: 0.08,
-      shadowRadius: 15,
-      shadowOffset: { width: 0, height: -5 },
-      elevation: 8,
-      flex: 1, // Take remaining space
-      minHeight: 120, // Ensure enough space for buttons
+      paddingHorizontal: 18,
+      paddingTop: 14,
+      paddingBottom: 24, // Increased from 16 to 24 for better button spacing
+      borderBottomLeftRadius: 28,
+      borderBottomRightRadius: 28,
+      height: cardHeight * 0.30, // Reduced to 30% for vertical card
     },
   };
 };
@@ -625,43 +627,9 @@ const ProductCardSwipe = ({
 
   return (
     <View style={dynamicStyles.swipeCardContainer}>
-      {/* Main Image Container */}
-      <View style={dynamicStyles.swipeImageContainer}>
-        {/* Wishlist icon */}
-        <TouchableOpacity
-          style={styles.swipeWishlistIcon}
-          onPress={async (e) => {
-            e.stopPropagation();
-            if (isInWishlist(product.id)) {
-              removeFromWishlist(product.id);
-              if (userData?.id) {
-                await supabase
-                  .from('collection_products')
-                  .delete()
-                  .match({ product_id: product.id });
-              }
-            } else {
-              addToWishlist({
-                ...product,
-                price: minPrice,
-                featured_type: product.featured_type || undefined,
-              });
-              if (userData?.id) {
-                await supabase.from('collection_products').insert({
-                  user_id: userData.id,
-                  product_id: product.id,
-                });
-              }
-            }
-          }}
-        >
-          <Ionicons
-            name={isInWishlist(product.id) ? 'heart' : 'heart-outline'}
-            size={24}
-            color={isInWishlist(product.id) ? '#F53F7A' : '#fff'}
-          />
-        </TouchableOpacity>
-
+      <View style={dynamicStyles.swipeCardInner}>
+        {/* Main Image Container */}
+        <View style={dynamicStyles.swipeImageContainer}>
         {/* Featured badge */}
         {product.featured_type && (
           <View style={styles.swipeFeaturedBadge}>
@@ -765,54 +733,65 @@ const ProductCardSwipe = ({
         </View>
       </View>
 
-      {/* Product Info Panel */}
-      <View style={dynamicStyles.swipeInfoPanel}>
-        {/* Price Row */}
-        <View style={styles.swipePriceRow}>
-          <View style={styles.swipePriceContainer}>
-            <Text style={styles.swipePrice}>
-              {minPrice === maxPrice 
-                ? `₹${minPrice.toLocaleString()}` 
-                : `₹${minPrice.toLocaleString()} - ₹${maxPrice.toLocaleString()}`
-              }
+        {/* Product Info Panel */}
+        <View style={dynamicStyles.swipeInfoPanel}>
+          {/* Product Title and Vendor */}
+          <View style={styles.swipeProductInfoHeader}>
+            <Text style={styles.swipeVendorName} numberOfLines={1}>
+              {product.vendor_name || product.alias_vendor || 'Only2U'}
             </Text>
-            {discountPercentage > 0 && (
-              <>
-                <Text style={styles.swipeOriginalPriceText}>
-                  ₹{maxOriginalPrice.toLocaleString()}
-                </Text>
+            <Text style={styles.swipeProductTitle} numberOfLines={2}>
+              {product.name}
+            </Text>
+          </View>
+
+          {/* Price Row */}
+          <View style={styles.swipePriceRow}>
+            <View style={styles.swipePriceContainer}>
+              <Text style={styles.swipePrice}>
+                {minPrice === maxPrice 
+                  ? `₹${minPrice.toLocaleString()}` 
+                  : `₹${minPrice.toLocaleString()} - ₹${maxPrice.toLocaleString()}`
+                }
+              </Text>
+              {discountPercentage > 0 && (
                 <View style={styles.swipeDiscountTag}>
                   <Text style={styles.swipeDiscountText}>
                     -{discountPercentage}%
                   </Text>
                 </View>
-              </>
+              )}
+            </View>
+            {discountPercentage > 0 && (
+              <Text style={styles.swipeOriginalPriceText}>
+                ₹{maxOriginalPrice.toLocaleString()}
+              </Text>
             )}
           </View>
-        </View>
 
-        {/* Action Buttons */}
-        <View style={styles.swipeButtonRow}>
-          <TouchableOpacity
-            style={styles.swipeTryButton}
-            onPress={() => {
-              // Navigate to product details for virtual try-on
-              navigation.navigate('ProductDetails', { product, tryNow: true });
-            }}
-          >
-            <Ionicons name="camera-outline" size={18} color="#F53F7A" />
-            <Text style={styles.swipeTryButtonText}>Try On</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity
-            style={styles.swipeShopButton}
-            onPress={() => {
-              navigation.navigate('ProductDetails', { product });
-            }}
-          >
-            <Ionicons name="bag-outline" size={18} color="#fff" />
-            <Text style={styles.swipeShopButtonText}>Shop Now</Text>
-          </TouchableOpacity>
+          {/* Action Buttons */}
+          <View style={styles.swipeButtonRow}>
+            <TouchableOpacity
+              style={styles.swipeTryButton}
+              onPress={() => {
+                // Navigate to product details for virtual try-on
+                navigation.navigate('ProductDetails', { product, tryNow: true });
+              }}
+            >
+              <Ionicons name="camera-outline" size={18} color="#F53F7A" />
+              <Text style={styles.swipeTryButtonText}>Try On</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={styles.swipeShopButton}
+              onPress={() => {
+                navigation.navigate('ProductDetails', { product });
+              }}
+            >
+              <Ionicons name="bag-outline" size={18} color="#fff" />
+              <Text style={styles.swipeShopButtonText}>Shop Now</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
     </View>
@@ -1273,10 +1252,25 @@ const Products = () => {
       setRightSwipeCount(newCount);
       
       if (newCount % 5 === 0) {
-        setShowWishlistPopup(true);
-        setTimeout(() => {
-          setShowWishlistPopup(false);
-        }, 3000);
+        // Show toast notification instead of popup
+        Toast.show({
+          type: 'success',
+          text1: `🎉 ${newCount} items added to wishlist!`,
+          text2: 'Tap here to view your wishlist',
+          position: 'top',
+          visibilityTime: 5000,
+          topOffset: 50,
+          onPress: () => {
+            Toast.hide();
+            navigation.navigate('Wishlist' as never);
+          },
+          props: {
+            style: {
+              borderLeftWidth: 5,
+              borderLeftColor: '#F53F7A',
+            },
+          },
+        });
       }
     }
   };
@@ -1317,8 +1311,7 @@ const Products = () => {
   }>({});
   const [currentCardIndex, setCurrentCardIndex] = useState(0);
   const [tinderMode, setTinderMode] = useState(false); // New state for tinder mode
-  const [rightSwipeCount, setRightSwipeCount] = useState(0); // Track right swipes for popup
-  const [showWishlistPopup, setShowWishlistPopup] = useState(false); // Show popup after 5 swipes
+  const [rightSwipeCount, setRightSwipeCount] = useState(0); // Track right swipes for toast notification
 
   // Sort options mapping
   const sortOptions = [
@@ -1407,31 +1400,7 @@ const Products = () => {
     }
   }, [showSavedPopup, popupAnimation]);
 
-  // Auto-hide wishlist milestone popup with smooth animation
-  useEffect(() => {
-    if (showWishlistPopup) {
-      // Animate in
-      Animated.spring(popupAnimation, {
-        toValue: 1,
-        useNativeDriver: true,
-        tension: 100,
-        friction: 8,
-      }).start();
-
-      const timer = setTimeout(() => {
-        // Animate out
-        Animated.timing(popupAnimation, {
-          toValue: 0,
-          duration: 300,
-          useNativeDriver: true,
-        }).start(() => {
-          setShowWishlistPopup(false);
-        });
-      }, 3000);
-
-      return () => clearTimeout(timer);
-    }
-  }, [showWishlistPopup, popupAnimation]);
+  // Removed wishlist popup animation - now using toast notifications
 
   // Reset animation when popup is hidden
   useEffect(() => {
@@ -1739,28 +1708,14 @@ const Products = () => {
           />
         )}
         <View style={styles.productInfo}>
-          {/* Stock indicator above product title */}
-          <View style={styles.stockIndicator}>
-            <Text style={styles.stockText}>
-              {totalStock} {t('left')}
-            </Text>
-          </View>
+          {/* Vendor name above product title */}
+          <Text style={styles.vendorName} numberOfLines={1}>
+            {product.vendor_name || product.alias_vendor || 'Only2U'}
+          </Text>
 
           <Text style={styles.productName} numberOfLines={2}>
             {product.name}
           </Text>
-
-          {/* Discount badge moved below product name */}
-          {hasDiscount && (
-            <View style={styles.discountBadgeInline}>
-              <Text style={styles.discountBadgeTextInline}>
-                {Math.round(
-                  Math.max(...(product.variants?.map((v: any) => v.discount_percentage || 0) || [0]))
-                )}
-                % OFF
-              </Text>
-            </View>
-          )}
 
           <View style={styles.priceContainer}>
             <View style={styles.priceInfo}>
@@ -1768,6 +1723,17 @@ const Products = () => {
                 <Text style={styles.originalPrice}>₹{Math.round(originalPrice)}</Text>
               )}
               <Text style={styles.price}>₹{Math.round(getUserPrice(product))}</Text>
+              {/* Discount badge beside price */}
+              {hasDiscount && (
+                <View style={styles.discountBadgeInline}>
+                  <Text style={styles.discountBadgeTextInline}>
+                    {Math.round(
+                      Math.max(...(product.variants?.map((v: any) => v.discount_percentage || 0) || [0]))
+                    )}
+                    % OFF
+                  </Text>
+                </View>
+              )}
             </View>
             <View style={styles.discountAndRatingRow}>
               <View style={styles.reviewsContainer}>
@@ -2086,7 +2052,7 @@ const Products = () => {
         // Tinder Mode
         <View style={[styles.tinderModeContainer, { 
           paddingTop: 20,
-          paddingBottom: insets.bottom + 5,
+          paddingBottom: Math.max(insets.bottom + 15, 25), // Increased for better button visibility
           height: screenHeight - insets.top - insets.bottom - 120
         }]}>
           <CustomSwipeView 
@@ -2314,48 +2280,7 @@ const Products = () => {
         </Animated.View>
       )}
 
-      {/* Wishlist Milestone Popup */}
-      {showWishlistPopup && (
-        <Animated.View
-          style={[
-            styles.wishlistMilestonePopup,
-            {
-              transform: [
-                {
-                  scale: popupAnimation.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [0.8, 1],
-                  }),
-                },
-              ],
-              opacity: popupAnimation,
-              zIndex: 1000,
-            },
-          ]}>
-          <View style={styles.wishlistMilestoneContent}>
-            <View style={styles.wishlistMilestoneIcon}>
-              <Ionicons name="heart" size={32} color="#F53F7A" />
-            </View>
-            <Text style={styles.wishlistMilestoneTitle}>Awesome!</Text>
-            <Text style={styles.wishlistMilestoneSubtitle}>
-              You've added {rightSwipeCount} items to your wishlist
-            </Text>
-            <TouchableOpacity
-              style={styles.wishlistMilestoneButton}
-              onPress={() => {
-                Animated.timing(popupAnimation, {
-                  toValue: 0,
-                  duration: 300,
-                  useNativeDriver: true,
-                }).start(() => {
-                  setShowWishlistPopup(false);
-                });
-              }}>
-              <Text style={styles.wishlistMilestoneButtonText}>Keep Swiping!</Text>
-            </TouchableOpacity>
-          </View>
-        </Animated.View>
-      )}
+      {/* Wishlist milestone notification now handled by Toast */}
     </View>
   );
 };
@@ -2364,9 +2289,11 @@ const styles = StyleSheet.create({
   // Custom Swipe View Styles
   customSwipeContainer: {
     flex: 1,
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
     alignItems: 'center',
     position: 'relative',
+    paddingTop: 10, // Reduced from 20 to extend card more
+    paddingBottom: 20, // Increased from 10 to 20 for better button spacing
   },
   stackedCard: {
     position: 'absolute',
@@ -3214,15 +3141,13 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 16,
   },
-  stockIndicator: {
-    backgroundColor: '#fff',
-    alignSelf: 'flex-start',
+  vendorName: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#666',
     marginBottom: 4,
-  },
-  stockText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#FF3B30',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   savedPopup: {
     position: 'absolute',
@@ -3323,19 +3248,17 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
   discountBadgeInline: {
-    alignSelf: 'flex-start',
     backgroundColor: '#F53F7A',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-    marginTop: 6,
-    marginBottom: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    marginLeft: 6,
   },
   discountBadgeTextInline: {
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: '700',
     color: '#fff',
-    letterSpacing: 0.3,
+    letterSpacing: 0.2,
   },
   reviewsContainer: {
     flexDirection: 'row',
@@ -3417,60 +3340,7 @@ const styles = StyleSheet.create({
     color: '#666',
   },
   
-  // Wishlist Milestone Popup Styles
-  wishlistMilestonePopup: {
-    position: 'absolute',
-    top: '50%',
-    left: 20,
-    right: 20,
-    transform: [{ translateY: -100 }],
-  },
-  wishlistMilestoneContent: {
-    backgroundColor: '#fff',
-    borderRadius: 20,
-    padding: 24,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.2,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 15,
-    borderWidth: 2,
-    borderColor: '#F53F7A',
-  },
-  wishlistMilestoneIcon: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: '#FFE8F0',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  wishlistMilestoneTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 8,
-  },
-  wishlistMilestoneSubtitle: {
-    fontSize: 16,
-    color: '#666',
-    textAlign: 'center',
-    marginBottom: 20,
-    lineHeight: 22,
-  },
-  wishlistMilestoneButton: {
-    backgroundColor: '#F53F7A',
-    borderRadius: 25,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-  },
-  wishlistMilestoneButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
+  // Wishlist milestone notification now handled by Toast - styles removed
   
   // Tinder Mode Container - Enhanced for better centering
   tinderModeContainer: {
@@ -3545,21 +3415,40 @@ const styles = StyleSheet.create({
   // swipeVideoStyle moved to dynamic styles
   swipeNavButton: {
     position: 'absolute',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    left: 0,
+    right: 0,
     top: '50%',
     transform: [{ translateY: -20 }],
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    paddingHorizontal: 12,
     zIndex: 9,
   },
   swipeNavLeft: {
-    left: 12,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 5,
   },
   swipeNavRight: {
-    right: 12,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 5,
   },
   swipeTopOverlay: {
     position: 'absolute',
@@ -3620,6 +3509,23 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   // swipeInfoPanel moved to dynamic styles
+  swipeProductInfoHeader: {
+    marginBottom: 10,
+  },
+  swipeVendorName: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#666',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 4,
+  },
+  swipeProductTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#111',
+    lineHeight: 24,
+  },
   swipePriceRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -3629,29 +3535,31 @@ const styles = StyleSheet.create({
   swipePriceContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 10,
   },
   swipePrice: {
-    fontSize: 26,
+    fontSize: 24,
     fontWeight: '800',
     color: '#333',
-    letterSpacing: 0.5,
+    letterSpacing: 0.3,
   },
   swipeOriginalPriceText: {
-    fontSize: 16,
+    fontSize: 15,
     color: '#999',
     textDecorationLine: 'line-through',
+    fontWeight: '500',
   },
   swipeDiscountTag: {
     backgroundColor: '#F53F7A',
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
   },
   swipeDiscountText: {
     color: '#fff',
-    fontSize: 12,
-    fontWeight: 'bold',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.3,
   },
   swipeButtonRow: {
     flexDirection: 'row',
@@ -3665,20 +3573,20 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderWidth: 2,
     borderColor: '#F53F7A',
-    borderRadius: 16,
-    paddingVertical: 14,
-    gap: 8,
+    borderRadius: 14,
+    paddingVertical: 16, // Increased from 14
+    gap: 6,
     shadowColor: '#F53F7A',
-    shadowOpacity: 0.2,
+    shadowOpacity: 0.25,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 4 },
     elevation: 6,
   },
   swipeTryButtonText: {
     color: '#F53F7A',
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
-    letterSpacing: 0.5,
+    letterSpacing: 0.3,
   },
   swipeShopButton: {
     flex: 1,
@@ -3686,20 +3594,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#F53F7A',
-    borderRadius: 16,
-    paddingVertical: 14,
-    gap: 8,
+    borderRadius: 14,
+    paddingVertical: 16, // Increased from 14
+    gap: 6,
     shadowColor: '#F53F7A',
-    shadowOpacity: 0.3,
+    shadowOpacity: 0.35,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 5 },
     elevation: 8,
   },
   swipeShopButtonText: {
     color: '#fff',
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
-    letterSpacing: 0.5,
+    letterSpacing: 0.3,
   },
 });
 

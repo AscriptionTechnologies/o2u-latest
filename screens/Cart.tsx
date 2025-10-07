@@ -22,7 +22,7 @@ const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
 
 const Cart = () => {
   const navigation = useNavigation();
-  const { cartItems, removeFromCart, updateQuantity, getCartTotal } = useCart();
+  const { cartItems, removeFromCart, updateQuantity, getCartTotal, addToCart } = useCart();
   const [suggested, setSuggested] = useState<any[]>([]);
   const [quickViewVisible, setQuickViewVisible] = useState(false);
   const [quickViewItem, setQuickViewItem] = useState<any | null>(null);
@@ -368,27 +368,69 @@ const Cart = () => {
                   contentContainerStyle={styles.suggestedScroller}
                 >
                   {suggested.map((p: any) => {
-                    const firstVariant = (p.product_variants || [])[0];
+                    const firstVariant = (p.product_variants || p.variants || [])[0];
                     const price = firstVariant?.price || 0;
                     const img = (firstVariant?.image_urls && firstVariant.image_urls[0]) || (p.image_urls && p.image_urls[0]);
+                    
+                    // Transform product for navigation
+                    const productForDetails = {
+                      id: p.id,
+                      name: p.name,
+                      price: price,
+                      image: img,
+                      image_urls: p.image_urls || (img ? [img] : []),
+                      video_urls: p.video_urls || [],
+                      description: p.description || '',
+                      stock: firstVariant?.quantity?.toString() || '0',
+                      featured: p.featured_type !== null,
+                      sku: firstVariant?.sku || p.id,
+                      category: p.category?.name || '',
+                      vendor_name: p.vendor_name || '',
+                      alias_vendor: p.alias_vendor || '',
+                      return_policy: p.return_policy || '',
+                      variants: p.variants || p.product_variants || [],
+                    };
+                    
                     return (
-                      <TouchableOpacity 
-                        key={p.id} 
-                        style={styles.suggestedCard}
-                        onPress={handleContinueShopping}
-                      >
-                        <Image 
-                          source={{ uri: img || 'https://via.placeholder.com/160x160.png?text=Only2U' }} 
-                          style={styles.suggestedImage} 
-                        />
-                        <View style={styles.suggestedInfo}>
-                          <Text style={styles.suggestedName} numberOfLines={2}>{p.name}</Text>
-                          <Text style={styles.suggestedPrice}>₹{price}</Text>
-                          <View style={styles.suggestedAddButton}>
-                            <Ionicons name="add" size={16} color="#F53F7A" />
+                      <View key={p.id} style={styles.suggestedCard}>
+                        <TouchableOpacity 
+                          onPress={() => (navigation as any).navigate('ProductDetails', { product: productForDetails })}
+                          activeOpacity={0.9}
+                        >
+                          <Image 
+                            source={{ uri: img || 'https://via.placeholder.com/160x160.png?text=Only2U' }} 
+                            style={styles.suggestedImage} 
+                          />
+                          <View style={styles.suggestedInfo}>
+                            <Text style={styles.suggestedName} numberOfLines={2}>{p.name}</Text>
+                            <Text style={styles.suggestedPrice}>₹{price}</Text>
                           </View>
-                        </View>
-                      </TouchableOpacity>
+                        </TouchableOpacity>
+                        <TouchableOpacity 
+                          style={styles.suggestedAddButton}
+                          onPress={() => {
+                            // Add to cart with default variant
+                            if (firstVariant) {
+                              addToCart({
+                                name: p.name,
+                                price: price,
+                                image: img,
+                                image_urls: p.image_urls || (img ? [img] : []),
+                                size: firstVariant.size?.name || 'Default',
+                                color: firstVariant.color?.name || 'N/A',
+                                quantity: 1,
+                                stock: firstVariant.quantity || 0,
+                                category: p.category?.name || '',
+                                sku: firstVariant.sku || p.id,
+                              });
+                              Alert.alert('Added!', `${p.name} added to cart`, [{ text: 'OK' }]);
+                            }
+                          }}
+                          activeOpacity={0.7}
+                        >
+                          <Ionicons name="add" size={18} color="#fff" />
+                        </TouchableOpacity>
+                      </View>
                     );
                   })}
                 </ScrollView>
@@ -920,12 +962,17 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 8,
     right: 8,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#FEE2E2',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#F53F7A',
     alignItems: 'center',
     justifyContent: 'center',
+    shadowColor: '#F53F7A',
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
   },
   bottomSpacer: {
     height: 20,

@@ -4,6 +4,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigation as useRootNavigation } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Profile from '~/screens/Profile';
 import Dashboard from '~/screens/Dashboard';
 import TrendingScreen from '~/screens/Trending';
@@ -20,6 +21,7 @@ import ProductManagement from '~/screens/ProductManagement';
 import ColorManagement from '~/screens/ColorManagement';
 import UserManagement from '~/screens/UserManagement';
 import Wishlist from '~/screens/Wishlist';
+import CollectionDetails from '~/screens/CollectionDetails';
 import VendorProfile from '~/screens/VendorProfile';
 import JoinInfluencer from '~/screens/JoinInfluencer';
 import ResellerRegistration from '~/screens/ResellerRegistration';
@@ -48,6 +50,7 @@ const HomeStack = () => {
       <Stack.Screen name="BodyMeasurements" component={BodyMeasurements} />
       <Stack.Screen name="HelpCenter" component={HelpCenter} />
       <Stack.Screen name="Wishlist" component={Wishlist} />
+      <Stack.Screen name="CollectionDetails" component={CollectionDetails} />
       <Stack.Screen name="VendorProfile" component={VendorProfile} />
       <Stack.Screen name="JoinInfluencer" component={JoinInfluencer} />
       <Stack.Screen name="ResellerRegistration" component={ResellerRegistration} />
@@ -78,6 +81,8 @@ export default function TabLayout() {
   const { getCartCount } = useCart();
   const cartCount = getCartCount();
   const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
+  
   // Safe translate helper: prettifies missing keys and underscores
   const tt = (key: string, fallback: string) => {
     try {
@@ -288,12 +293,12 @@ export default function TabLayout() {
     }
   };
 
-  // Base tab bar style
+  // Base tab bar style with safe area insets
   const baseTabBarStyle = {
           backgroundColor: '#FFFFFF',
           paddingTop: 8,
-          paddingBottom: Platform.OS === 'ios' ? 25 : 8,
-          height: Platform.OS === 'ios' ? 85 : 70,
+          paddingBottom: Math.max(insets.bottom, 8),
+          height: Math.max(insets.bottom + 60, 70),
           borderTopWidth: 1,
           borderTopColor: '#F0F0F0',
           shadowColor: '#000',

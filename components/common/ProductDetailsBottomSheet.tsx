@@ -1394,7 +1394,7 @@ const ProductDetailsBottomSheet: React.FC<ProductDetailsBottomSheetProps> = ({
               <Ionicons name="close" size={24} color="#333" />
             </TouchableOpacity>
             <Text style={styles.akoolTitle}>👗 Want to see how this outfit looks on you?</Text>
-            <Text style={styles.akoolSubtitle}>Try on with Virtual Try-On AI</Text>
+            <Text style={styles.akoolSubtitle}>Try on with Only2U Virtual Try-On AI</Text>
             <View style={styles.akoolOptions}>
               <TouchableOpacity
                 style={[styles.akoolOption, selectedOption === 'photo' && styles.akoolOptionSelected]}

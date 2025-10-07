@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -15,14 +15,13 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useCart } from '~/contexts/CartContext';
 import { useUser } from '~/contexts/UserContext';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '~/utils/supabase';
 import OrderSuccessAnimation from '~/components/OrderSuccessAnimation';
 import { isRazorpaySupported, openRazorpayCheckout, createRazorpayOptions } from '~/utils/razorpay';
-import { useEffect } from 'react';
 
 type PaymentMethod = 'razorpay' | 'cod' | 'giftcard' | null;
 
@@ -63,22 +62,31 @@ const Checkout = () => {
   };
 
   // Fetch default address from address book
-  useEffect(() => {
-    const fetchDefaultAddress = async () => {
-      if (!userData?.id) return;
-      const { data, error } = await supabase
-        .from('user_addresses')
-        .select('*')
-        .eq('user_id', userData.id)
-        .eq('is_default', true)
-        .single();
-      
-      if (!error && data) {
-        setDefaultAddress(data);
-      }
-    };
-    fetchDefaultAddress();
+  const fetchDefaultAddress = useCallback(async () => {
+    if (!userData?.id) return;
+    const { data, error } = await supabase
+      .from('user_addresses')
+      .select('*')
+      .eq('user_id', userData.id)
+      .eq('is_default', true)
+      .single();
+    
+    if (!error && data) {
+      setDefaultAddress(data);
+    }
   }, [userData?.id]);
+
+  // Fetch addresses on mount
+  useEffect(() => {
+    fetchDefaultAddress();
+  }, [fetchDefaultAddress]);
+
+  // Refresh addresses when screen comes into focus (e.g., after adding new address)
+  useFocusEffect(
+    useCallback(() => {
+      fetchDefaultAddress();
+    }, [fetchDefaultAddress])
+  );
 
   // Address management functions
   const handleAddAddress = () => {
