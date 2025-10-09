@@ -17,6 +17,7 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Platform,
+  Linking,
 } from 'react-native';
 import { Clipboard } from 'react-native';
 import { FontAwesome, Ionicons } from '@expo/vector-icons';
@@ -125,6 +126,10 @@ const TrendingScreen = () => {
   const { isInWishlist, toggleWishlist } = useWishlist();
   const { addToPreview } = usePreview();
   const { userData, setUserData, refreshUserData } = useUser();
+  const [swipeCount, setSwipeCount] = useState(0);
+  const [hasShownSwipeNotification, setHasShownSwipeNotification] = useState(false);
+  const [showSwipeNotification, setShowSwipeNotification] = useState(false);
+  const notificationAnimation = useRef(new Animated.Value(-100)).current;
 
   // Hide tab bar when on trending screen
   useEffect(() => {
@@ -178,6 +183,7 @@ const TrendingScreen = () => {
 
   const commentsSheetRef = useRef<BottomSheet>(null);
   const ugcActionsSheetRef = useRef<BottomSheet>(null);
+  const shareSheetRef = useRef<BottomSheet>(null);
   const snapPoints = useMemo(() => ['50%', '70%'], []);
 
   const getUserPrice = useCallback((product: Product) => {
@@ -289,6 +295,35 @@ const TrendingScreen = () => {
       fetchAllCommentCounts(products.map(p => p.id));
     }
   }, [products]);
+
+  // Track swipes and show notification after 5 swipes
+  useEffect(() => {
+    console.log('Current index:', currentIndex, 'Has shown notification:', hasShownSwipeNotification);
+    if (currentIndex >= 4 && !hasShownSwipeNotification) {
+      setHasShownSwipeNotification(true);
+      setShowSwipeNotification(true);
+      console.log('Showing 5 products swiped notification');
+      
+      // Animate in
+      Animated.spring(notificationAnimation, {
+        toValue: 0,
+        useNativeDriver: true,
+        tension: 100,
+        friction: 8,
+      }).start();
+
+      // Auto-hide after 5 seconds
+      setTimeout(() => {
+        Animated.timing(notificationAnimation, {
+          toValue: -100,
+          duration: 300,
+          useNativeDriver: true,
+        }).start(() => {
+          setShowSwipeNotification(false);
+        });
+      }, 5000);
+    }
+  }, [currentIndex, hasShownSwipeNotification, notificationAnimation]);
 
   // Auto-hide saved popup with smooth animation
   useEffect(() => {
@@ -1166,11 +1201,11 @@ const TrendingScreen = () => {
           </TouchableOpacity>
         ) : (
           <View>
-            <Image
-              source={{ uri: mainMedia.thumbnail }}
-              style={styles.videoBackground}
-              resizeMode="cover"
-            />
+          <Image
+            source={{ uri: mainMedia.thumbnail }}
+            style={styles.videoBackground}
+            resizeMode="cover"
+          />
             <View style={styles.gradientOverlay} />
           </View>
         )}
@@ -1179,8 +1214,8 @@ const TrendingScreen = () => {
         <View style={[styles.topBar, { paddingTop: insets.top + 12 }]}>
           <TouchableOpacity style={styles.topBarButton} onPress={() => navigation.goBack()}>
             <Ionicons name="arrow-back" size={24} color="#fff" />
-          </TouchableOpacity>
-          
+        </TouchableOpacity>
+
           <View style={styles.topBarRight}>
             {hasVideo && (
               <TouchableOpacity
@@ -1194,47 +1229,70 @@ const TrendingScreen = () => {
                 />
               </TouchableOpacity>
             )}
+            
+            {/* Wishlist button in top bar */}
+            <TouchableOpacity
+              style={styles.topBarButton}
+              onPress={async (e) => {
+                e.stopPropagation && e.stopPropagation();
+                if (isInWishlist(product.id)) {
+                  toggleWishlist({
+                    ...product,
+                    price: productPrices[product.id] || 0,
+                    featured_type: product.featured_type || undefined
+                  });
+                  if (userData?.id) {
+                    await supabase
+                      .from('collection_products')
+                      .delete()
+                      .match({ product_id: product.id });
+                  }
+                } else {
+                  setSelectedProduct({
+                    ...product,
+                    price: productPrices[product.id] || 0,
+                    featured_type: product.featured_type || undefined
+                  } as any);
+                  setShowCollectionSheet(true);
+                }
+              }}
+              activeOpacity={0.7}
+            >
+              <Ionicons
+                name={isInWishlist(product.id) ? 'heart' : 'heart-outline'}
+                size={24}
+                color={isInWishlist(product.id) ? '#F53F7A' : '#fff'}
+              />
+            </TouchableOpacity>
           </View>
         </View>
 
         {/* Right Side Actions with improved design */}
         <View style={styles.rightActions}>
-          {/* Wishlist/Save - Only like button */}
+          {/* Like button */}
           <TouchableOpacity
             style={styles.modernActionButton}
-            onPress={async (e) => {
-              e.stopPropagation && e.stopPropagation();
-              if (isInWishlist(product.id)) {
-                toggleWishlist({
-                  ...product,
-                  price: productPrices[product.id] || 0,
-                  featured_type: product.featured_type || undefined
-                });
-                if (userData?.id) {
-                  await supabase
-                    .from('collection_products')
-                    .delete()
-                    .match({ product_id: product.id });
-                }
+            onPress={async () => {
+              // Toggle like for the product
+              const currentLikeState = likeStates[product.id] || false;
+              if (currentLikeState) {
+                await handleLike(product.id);
+                Toast.show({ type: 'info', text1: 'Removed from likes' });
               } else {
-                setSelectedProduct({
-                  ...product,
-                  price: productPrices[product.id] || 0,
-                  featured_type: product.featured_type || undefined
-                } as any);
-                setShowCollectionSheet(true);
+                await handleLike(product.id);
+                Toast.show({ type: 'success', text1: 'Added to likes' });
               }
             }}
             activeOpacity={0.7}
           >
-            <View style={[styles.actionIconCircle, inWishlist && styles.actionIconCircleActive]}>
+            <View style={styles.actionIconCircle}>
               <Ionicons
-                name={isInWishlist(product.id) ? 'heart' : 'heart-outline'}
+                name={likeStates[product.id] ? 'thumbs-up' : 'thumbs-up-outline'}
                 size={28}
-                color={isInWishlist(product.id) ? '#F53F7A' : '#fff'}
+                color={likeStates[product.id] ? '#F53F7A' : '#fff'}
               />
             </View>
-            <Text style={styles.modernActionText}>Save</Text>
+            <Text style={styles.modernActionText}>Like</Text>
           </TouchableOpacity>
 
           {/* Q&A button - replaced comments */}
@@ -1251,18 +1309,9 @@ const TrendingScreen = () => {
           {/* Share button */}
           <TouchableOpacity
             style={styles.modernActionButton}
-            onPress={async () => {
-              try {
-                const shareUrl = firstVariant?.image_urls?.[0] || product.image_urls?.[0] || '';
-                if (shareUrl) {
-                  Clipboard.setString(shareUrl);
-                }
-                if (userData?.id) {
-                  await akoolService.awardReferralCoins(userData.id, product.id, 'share_button', 2);
-                  setCoinBalance((prev) => prev + 2);
-                  Toast.show({ type: 'success', text1: t('coins_awarded') || 'Coins awarded', text2: '+2 coins for sharing' });
-                }
-              } catch {}
+            onPress={() => {
+              setUGCActionProductId(product.id);
+              shareSheetRef.current?.expand();
             }}
           >
             <View style={styles.actionIconCircle}>
@@ -1295,34 +1344,34 @@ const TrendingScreen = () => {
               onPress={() => handleVendorProfile(vendor)}
               activeOpacity={0.8}
             >
-              <Image
+                  <Image
                 source={{ uri: vendor?.profile_image_url || 'https://via.placeholder.com/40' }}
                 style={styles.modernVendorAvatar}
               />
               <View style={styles.modernVendorTextCol}>
                 <View style={styles.vendorNameFollowRow}>
                   <Text style={styles.modernVendorHandle}>{vendorHandle}</Text>
-                  {vendor && (
-                    <TouchableOpacity
-                      style={[
+              {vendor && (
+                <TouchableOpacity
+                  style={[
                         styles.compactFollowButton,
                         isFollowingVendorSafe(vendor.id) && styles.compactFollowingButton
-                      ]}
-                      onPress={() => handleFollowVendor(vendor.id)}
+                  ]}
+                  onPress={() => handleFollowVendor(vendor.id)}
                       activeOpacity={0.8}
-                    >
+                >
                       <Text style={styles.compactFollowText}>
-                        {isFollowingVendorSafe(vendor.id) ? 'Following' : 'Follow'}
-                      </Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
+                    {isFollowingVendorSafe(vendor.id) ? 'Following' : 'Follow'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
                 <Text style={styles.modernProductName} numberOfLines={1}>{product.name}</Text>
               </View>
             </TouchableOpacity>
           </View>
 
-          {/* Price and Rating Row */}
+          {/* Price Row */}
           <View style={styles.modernPriceRow}>
             <View style={styles.modernPriceGroup}>
               <Text style={styles.modernPrice}>₹{productPrices[product.id]?.toFixed(2) || '0.00'}</Text>
@@ -1342,16 +1391,6 @@ const TrendingScreen = () => {
                 }
                 return null;
               })()}
-            </View>
-            
-            <View style={styles.modernRatingBadge}>
-              <Ionicons name="star" size={14} color="#FFD700" />
-              <Text style={styles.modernRatingText}>
-                {productRatings[product.id]?.rating?.toFixed(1) || '0.0'}
-              </Text>
-              <Text style={styles.modernReviewsText}>
-                ({productRatings[product.id]?.reviews || 0})
-              </Text>
             </View>
           </View>
 
@@ -1422,8 +1461,8 @@ const TrendingScreen = () => {
       .order('created_at', { ascending: true });
     if (!error && data) {
       const mapped = data.map((c: any) => ({
-        ...c,
-        user_name: c.users?.name || 'User',
+          ...c,
+          user_name: c.users?.name || 'User',
       }));
       const filtered = mapped.filter((c: any) => !blockedUserIds.includes(c.user_id));
       setComments(filtered);
@@ -1775,7 +1814,7 @@ const TrendingScreen = () => {
                   <View style={{ flex: 1 }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
                       <Ionicons name="person-circle" size={20} color="#666" style={{ marginRight: 6 }} />
-                      <Text style={styles.commentUser}>{item.user_name || 'User'}</Text>
+                <Text style={styles.commentUser}>{item.user_name || 'User'}</Text>
                       <Text style={styles.qaDate}> • {new Date(item.created_at).toLocaleDateString()}</Text>
                     </View>
                     <View style={styles.questionBubble}>
@@ -2031,6 +2070,155 @@ const TrendingScreen = () => {
           </TouchableOpacity>
         </View>
       </BottomSheet>
+
+      {/* Share Bottom Sheet */}
+      <BottomSheet
+        ref={shareSheetRef}
+        index={-1}
+        snapPoints={['30%']}
+        enablePanDownToClose
+        backgroundStyle={{ backgroundColor: '#fff' }}
+      >
+        <View style={styles.ugcActionsContainer}>
+          <View style={styles.ugcActionsHeader}>
+            <Text style={styles.ugcActionsTitle}>Share Product</Text>
+            <TouchableOpacity onPress={() => shareSheetRef.current?.close()}>
+              <Ionicons name="close" size={24} color="#333" />
+            </TouchableOpacity>
+          </View>
+
+          {/* Share Options Row */}
+          <View style={styles.shareOptionsRow}>
+            {/* WhatsApp */}
+            <TouchableOpacity
+              style={styles.shareOptionCard}
+              onPress={async () => {
+                try {
+                  const product = products.find(p => p.id === ugcActionProductId);
+                  if (product) {
+                    const firstVariant = product.variants?.[0];
+                    const shareUrl = firstVariant?.image_urls?.[0] || product.image_urls?.[0] || '';
+                    const whatsappUrl = `whatsapp://send?text=${encodeURIComponent(`Check out this product: ${shareUrl}`)}`;
+                    
+                    const canOpen = await Linking.canOpenURL(whatsappUrl);
+                    if (canOpen) {
+                      await Linking.openURL(whatsappUrl);
+                      
+                      // Award coins after 10 seconds
+                      setTimeout(async () => {
+                        if (userData?.id) {
+                          await akoolService.awardReferralCoins(userData.id, product.id, 'share_button', 2);
+                          setCoinBalance((prev) => prev + 2);
+                          Toast.show({ 
+                            type: 'success', 
+                            text1: t('coins_awarded') || 'Coins awarded', 
+                            text2: '+2 coins for sharing' 
+                          });
+                        }
+                      }, 10000);
+                    } else {
+                      Toast.show({ 
+                        type: 'error', 
+                        text1: 'WhatsApp not installed', 
+                        text2: 'Please install WhatsApp to share' 
+                      });
+                    }
+                    shareSheetRef.current?.close();
+                  }
+                } catch (error) {
+                  Toast.show({ type: 'error', text1: 'Error', text2: 'Failed to share via WhatsApp' });
+                }
+              }}
+            >
+              <View style={styles.shareOptionIconCircle}>
+                <Ionicons name="logo-whatsapp" size={32} color="#25D366" />
+              </View>
+              <Text style={styles.shareOptionTitle}>WhatsApp</Text>
+              <Text style={styles.shareOptionSubtitle}>Share via app</Text>
+            </TouchableOpacity>
+
+            {/* Copy Link */}
+            <TouchableOpacity
+              style={styles.shareOptionCard}
+              onPress={async () => {
+                try {
+                  const product = products.find(p => p.id === ugcActionProductId);
+                  if (product) {
+                    const firstVariant = product.variants?.[0];
+                    const shareUrl = firstVariant?.image_urls?.[0] || product.image_urls?.[0] || '';
+                    if (shareUrl) {
+                      Clipboard.setString(shareUrl);
+                      Toast.show({ 
+                        type: 'success', 
+                        text1: 'Link Copied', 
+                        text2: 'Share link copied to clipboard' 
+                      });
+                      
+                      // Award coins after 10 seconds
+                      setTimeout(async () => {
+                        if (userData?.id) {
+                          await akoolService.awardReferralCoins(userData.id, product.id, 'share_button', 2);
+                          setCoinBalance((prev) => prev + 2);
+                          Toast.show({ 
+                            type: 'success', 
+                            text1: t('coins_awarded') || 'Coins awarded', 
+                            text2: '+2 coins for sharing' 
+                          });
+                        }
+                      }, 10000);
+                    }
+                    shareSheetRef.current?.close();
+                  }
+                } catch (error) {
+                  Toast.show({ type: 'error', text1: 'Error', text2: 'Failed to copy link' });
+                }
+              }}
+            >
+              <View style={styles.shareOptionIconCircle}>
+                <Ionicons name="link" size={32} color="#3B82F6" />
+              </View>
+              <Text style={styles.shareOptionTitle}>Copy Link</Text>
+              <Text style={styles.shareOptionSubtitle}>Copy to clipboard</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </BottomSheet>
+
+      {/* Custom Swipe Notification */}
+      {showSwipeNotification && (
+        <Animated.View 
+          style={[
+            styles.swipeNotification,
+            {
+              transform: [{ translateY: notificationAnimation }]
+            }
+          ]}
+        >
+          <View style={styles.notificationContent}>
+            <View style={styles.notificationIconContainer}>
+              <Ionicons name="sparkles" size={24} color="#F53F7A" />
+            </View>
+            <View style={styles.notificationTextContainer}>
+              <Text style={styles.notificationTitle}>🎉 Keep Exploring!</Text>
+              <Text style={styles.notificationSubtitle}>You've swiped through 5 products</Text>
+            </View>
+            <TouchableOpacity 
+              style={styles.notificationButton}
+              onPress={() => {
+                Animated.timing(notificationAnimation, {
+                  toValue: -100,
+                  duration: 300,
+                  useNativeDriver: true,
+                }).start(() => {
+                  setShowSwipeNotification(false);
+                });
+              }}
+            >
+              <Text style={styles.notificationButtonText}>Got it</Text>
+            </TouchableOpacity>
+          </View>
+        </Animated.View>
+      )}
     </View>
   );
 };
@@ -2128,7 +2316,7 @@ const styles = StyleSheet.create({
   rightActions: {
     position: 'absolute',
     right: 12,
-    bottom: Platform.OS === 'android' ? 200 : 220,
+    bottom: Platform.OS === 'android' ? 140 : 160,
     alignItems: 'center',
     gap: 18,
     zIndex: 50,
@@ -2144,11 +2332,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.45)',
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 5,
   },
   actionIconCircleActive: {
     backgroundColor: 'rgba(245, 63, 122, 0.2)',
@@ -2265,6 +2448,12 @@ const styles = StyleSheet.create({
   },
   modernPriceGroup: {
     flex: 1,
+  },
+  priceAndRatingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 4,
   },
   modernPrice: {
     color: '#fff',
@@ -3145,6 +3334,47 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#6B7280',
   },
+  // Share Options Row Styles
+  shareOptionsRow: {
+    flexDirection: 'row',
+    gap: 16,
+    paddingTop: 8,
+  },
+  shareOptionCard: {
+    flex: 1,
+    alignItems: 'center',
+    backgroundColor: '#F9FAFB',
+    borderRadius: 16,
+    paddingVertical: 24,
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  shareOptionIconCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  shareOptionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#111',
+    marginBottom: 4,
+  },
+  shareOptionSubtitle: {
+    fontSize: 12,
+    color: '#6B7280',
+    textAlign: 'center',
+  },
   // Vendor styles
   vendorInfo: {
     flexDirection: 'row',
@@ -3281,6 +3511,63 @@ const styles = StyleSheet.create({
   },
   followingButtonText: {
     color: '#fff',
+  },
+  // Custom Swipe Notification Styles
+  swipeNotification: {
+    position: 'absolute',
+    top: 60,
+    left: 16,
+    right: 16,
+    zIndex: 9999,
+    elevation: 10,
+  },
+  notificationContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
+    borderLeftWidth: 4,
+    borderLeftColor: '#F53F7A',
+  },
+  notificationIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#FFF0F6',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  notificationTextContainer: {
+    flex: 1,
+  },
+  notificationTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#111',
+    marginBottom: 2,
+  },
+  notificationSubtitle: {
+    fontSize: 13,
+    color: '#6B7280',
+  },
+  notificationButton: {
+    backgroundColor: '#F53F7A',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    marginLeft: 8,
+  },
+  notificationButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
 

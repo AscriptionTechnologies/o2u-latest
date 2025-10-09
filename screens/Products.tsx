@@ -39,8 +39,12 @@ import Toast from 'react-native-toast-message';
 // Get screen dimensions
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
-// cardHeight constant for backward compatibility - increased for better visibility
-const cardHeight = Math.min(screenHeight * 0.92, 750); // 92% of screen height, max 750 - extended to bottom
+// Dynamic cardHeight based on screen size - account for header, tab bar, and safe areas
+const cardHeight = screenHeight <= 667 // iPhone SE/8
+  ? Math.min(screenHeight * 0.70, 550)  // Smaller screens: 70%
+  : screenHeight <= 812 // iPhone X/11 Pro/12 Mini
+  ? Math.min(screenHeight * 0.72, 600)  // Medium screens: 72%
+  : Math.min(screenHeight * 0.75, 680); // Larger screens: 75%
 // Export cardHeight for external use
 export { cardHeight };
 interface Category {
@@ -399,16 +403,6 @@ const TinderCard = ({
                     </Text>
                   </View>
                 )}
-
-                <View style={styles.tinderRatingContainer}>
-                  <Ionicons name="star" size={14} color="#FFD600" />
-                  <Text style={styles.tinderRatingText}>
-                    {productRatings[product.id]?.rating?.toFixed(1) || '4.5'}
-                  </Text>
-                  <Text style={styles.tinderReviewsText}>
-                    ({productRatings[product.id]?.reviews || 10})
-                  </Text>
-                </View>
               </View>
             </View>
           </View>
@@ -544,7 +538,7 @@ const createSwipeCardStyles = (cardHeight: number, cardIndex: number = 0) => {
       height: cardHeight, // Fixed height
     },
     swipeImageContainer: {
-      height: cardHeight * 0.70, // Increased to 70% for vertical card
+      height: cardHeight * 0.75, // 75% for image - more vertical space
       position: 'relative' as const,
       borderTopLeftRadius: 28,
       borderTopRightRadius: 28,
@@ -552,12 +546,12 @@ const createSwipeCardStyles = (cardHeight: number, cardIndex: number = 0) => {
     },
     swipeImageBackground: {
       width: screenWidth - 32,
-      height: cardHeight * 0.70,
+      height: cardHeight * 0.75,
       justifyContent: 'flex-end' as const,
     },
     swipeVideoStyle: {
       width: screenWidth - 32,
-      height: cardHeight * 0.70,
+      height: cardHeight * 0.75,
     },
     swipeImageGradient: {
       position: 'absolute' as const,
@@ -568,12 +562,13 @@ const createSwipeCardStyles = (cardHeight: number, cardIndex: number = 0) => {
     },
     swipeInfoPanel: {
       backgroundColor: '#fff',
-      paddingHorizontal: 18,
-      paddingTop: 14,
-      paddingBottom: 24, // Increased from 16 to 24 for better button spacing
+      paddingHorizontal: 16,
+      paddingTop: 10,
+      paddingBottom: 12,
       borderBottomLeftRadius: 28,
       borderBottomRightRadius: 28,
-      height: cardHeight * 0.30, // Reduced to 30% for vertical card
+      height: cardHeight * 0.25, // 25% for info panel - more compact
+      justifyContent: 'space-between' as const, // Distribute space between elements
     },
   };
 };
@@ -710,25 +705,6 @@ const ProductCardSwipe = ({
             <Text style={styles.swipeProductName} numberOfLines={2}>
               {product.name}
             </Text>
-            {totalStock > 0 && (
-              <View style={styles.swipeStockIndicator}>
-                <Text style={styles.swipeStockText}>
-                  {totalStock} in stock
-                </Text>
-              </View>
-            )}
-          </View>
-          
-          <View style={styles.swipeMetaRow}>
-            <View style={styles.swipeRatingBadge}>
-              <Ionicons name="star" size={14} color="#FFD700" />
-              <Text style={styles.swipeRatingText}>
-                {product.rating?.toFixed(1) || '4.5'}
-              </Text>
-              <Text style={styles.swipeReviewsText}>
-                ({(product as any).review_count || 0})
-              </Text>
-            </View>
           </View>
         </View>
       </View>
@@ -745,27 +721,32 @@ const ProductCardSwipe = ({
             </Text>
           </View>
 
-          {/* Price Row */}
+          {/* Price Row with Stock - Enhanced visibility like grid view */}
           <View style={styles.swipePriceRow}>
-            <View style={styles.swipePriceContainer}>
-              <Text style={styles.swipePrice}>
-                {minPrice === maxPrice 
-                  ? `₹${minPrice.toLocaleString()}` 
-                  : `₹${minPrice.toLocaleString()} - ₹${maxPrice.toLocaleString()}`
-                }
-              </Text>
-              {discountPercentage > 0 && (
-                <View style={styles.swipeDiscountTag}>
-                  <Text style={styles.swipeDiscountText}>
-                    -{discountPercentage}%
-                  </Text>
-                </View>
-              )}
+            <View style={styles.swipePriceGroup}>
+              <View style={styles.swipePriceContainer}>
+                <Text style={styles.swipePrice}>
+                  ₹{minPrice.toLocaleString()}
+                </Text>
+                {discountPercentage > 0 && (
+                  <>
+                    <Text style={styles.swipeMRPStrike}>
+                      ₹{maxOriginalPrice.toLocaleString()}
+                    </Text>
+                    <Text style={styles.swipeDiscountBadge}>
+                      {discountPercentage}% OFF
+                    </Text>
+                  </>
+                )}
+              </View>
             </View>
-            {discountPercentage > 0 && (
-              <Text style={styles.swipeOriginalPriceText}>
-                ₹{maxOriginalPrice.toLocaleString()}
-              </Text>
+            {totalStock > 0 && (
+              <View style={styles.swipeStockBadge}>
+                <Ionicons name="checkmark-circle" size={14} color="#4CAF50" />
+                <Text style={styles.swipeStockText}>
+                  {totalStock} in stock
+                </Text>
+              </View>
             )}
           </View>
 
@@ -778,7 +759,7 @@ const ProductCardSwipe = ({
                 navigation.navigate('ProductDetails', { product, tryNow: true });
               }}
             >
-              <Ionicons name="camera-outline" size={18} color="#F53F7A" />
+              <Ionicons name="camera-outline" size={16} color="#F53F7A" />
               <Text style={styles.swipeTryButtonText}>Try On</Text>
             </TouchableOpacity>
             
@@ -788,7 +769,7 @@ const ProductCardSwipe = ({
                 navigation.navigate('ProductDetails', { product });
               }}
             >
-              <Ionicons name="bag-outline" size={18} color="#fff" />
+              <Ionicons name="bag-outline" size={16} color="#fff" />
               <Text style={styles.swipeShopButtonText}>Shop Now</Text>
             </TouchableOpacity>
           </View>
@@ -1226,6 +1207,59 @@ const Products = () => {
   const availableHeight = screenHeight - insets.top - insets.bottom - headerHeight - titleSectionHeight - bottomTabHeight - 20; // Reduced padding
   const dynamicCardHeight = Math.max(availableHeight * 0.85, screenHeight * 0.55); // Use 85% of available height, minimum 55% of screen height
   
+  // Function to get or create a category-specific "Swiped" collection
+  const getOrCreateSwipedCollection = async (categoryName: string): Promise<string | null> => {
+    if (!userData?.id) {
+      console.log('No user ID, cannot create collection');
+      return null;
+    }
+    
+    const collectionName = `Swiped - ${categoryName}`;
+    console.log('Getting or creating collection:', collectionName, 'for user:', userData.id);
+    
+    try {
+      // Check if collection already exists
+      const { data: existingCollection, error: fetchError } = await supabase
+        .from('collections')
+        .select('id')
+        .eq('user_id', userData.id)
+        .eq('name', collectionName)
+        .single();
+      
+      if (fetchError && fetchError.code !== 'PGRST116') {
+        console.error('Error fetching existing collection:', fetchError);
+      }
+      
+      if (existingCollection) {
+        console.log('Found existing collection:', existingCollection.id);
+        return existingCollection.id;
+      }
+      
+      console.log('Creating new collection:', collectionName);
+      // Create new collection if it doesn't exist
+      const { data: newCollection, error: createError } = await supabase
+        .from('collections')
+        .insert({
+          user_id: userData.id,
+          name: collectionName,
+          is_private: false,
+        })
+        .select('id')
+        .single();
+      
+      if (createError) {
+        console.error('Error creating swiped collection:', createError);
+        return null;
+      }
+      
+      console.log('Created new collection:', newCollection?.id);
+      return newCollection?.id || null;
+    } catch (error) {
+      console.error('Error in getOrCreateSwipedCollection:', error);
+      return null;
+    }
+  };
+
   // Swipe handlers for custom swipe view
   const handleSwipeRight = async (product: Product) => {
     if (isInWishlist(product.id)) {
@@ -1242,35 +1276,77 @@ const Products = () => {
         price: productPrices[product.id as string] || 0,
         featured_type: product.featured_type || undefined,
       });
+      
       if (userData?.id) {
-        await supabase.from('collection_products').insert({
-          user_id: userData.id,
-          product_id: product.id,
-        });
+        // Get or create the category-specific collection
+        let collectionId = swipedCollectionId;
+        if (!collectionId) {
+          collectionId = await getOrCreateSwipedCollection(category.name);
+          if (collectionId) {
+            setSwipedCollectionId(collectionId);
+          }
+        }
+        
+        // Add to default wishlist collection
+        try {
+          await supabase.from('collection_products').insert({
+            user_id: userData.id,
+            product_id: product.id,
+          });
+          console.log('Added to default wishlist collection');
+        } catch (error) {
+          console.error('Error adding to default wishlist:', error);
+        }
+        
+        // Also add to category-specific "Swiped" collection
+        if (collectionId) {
+          try {
+            await supabase.from('collection_products').insert({
+              user_id: userData.id,
+              product_id: product.id,
+              collection_id: collectionId,
+            });
+            console.log('Added to swiped collection:', collectionId);
+          } catch (error) {
+            console.error('Error adding to swiped collection:', error);
+          }
+        } else {
+          console.log('No collection ID available for swiped collection');
+        }
       }
+      
       const newCount = rightSwipeCount + 1;
       setRightSwipeCount(newCount);
+      console.log('Right swipe count:', newCount);
       
       if (newCount % 5 === 0) {
-        // Show toast notification instead of popup
-        Toast.show({
-          type: 'success',
-          text1: `🎉 ${newCount} items added to wishlist!`,
-          text2: 'Tap here to view your wishlist',
-          position: 'top',
-          visibilityTime: 5000,
-          topOffset: 50,
-          onPress: () => {
-            Toast.hide();
-            navigation.navigate('Wishlist' as never);
-          },
-          props: {
-            style: {
-              borderLeftWidth: 5,
-              borderLeftColor: '#F53F7A',
+        console.log('Showing toast for 5 swipes! Collection ID:', collectionId);
+        // Show toast notification with view button
+        const localCollectionId = collectionId; // Capture collectionId for closure
+        
+        // Force the toast to show at the top
+        setTimeout(() => {
+          Toast.show({
+            type: 'success',
+            text1: `🎉 ${newCount} items added to wishlist!`,
+            text2: 'Tap here to view your collection',
+            position: 'top',
+            visibilityTime: 5000,
+            topOffset: 50,
+            onPress: () => {
+              Toast.hide();
+              // Navigate to the specific collection if we have a collection ID
+              if (localCollectionId) {
+                navigation.navigate('CollectionDetails' as never, { 
+                  collectionId: localCollectionId,
+                  collectionName: `Swiped - ${category.name}`
+                } as never);
+              } else {
+                navigation.navigate('Wishlist' as never);
+              }
             },
-          },
-        });
+          });
+        }, 100);
       }
     }
   };
@@ -1291,6 +1367,7 @@ const Products = () => {
   const [showCollectionSheet, setShowCollectionSheet] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [layout, setLayout] = useState(true); // true for grid/tinder, false for list
+  const [swipedCollectionId, setSwipedCollectionId] = useState<string | null>(null);
   const { t } = useTranslation();
   const [langMenuVisible, setLangMenuVisible] = useState(false);
   const [filterSheetVisible, setFilterSheetVisible] = useState(false);
@@ -1644,22 +1721,6 @@ const Products = () => {
           />
         </TouchableOpacity>
 
-        {/* Resell button - visible for all logged-in users */}
-        {userData?.id && (
-          <TouchableOpacity
-            style={styles.resellIcon}
-            onPress={(e) => {
-              e.stopPropagation();
-              (navigation as any).navigate('CatalogShare', { product });
-            }}
-            activeOpacity={0.7}>
-            <Ionicons
-              name="share-social"
-              size={20}
-              color="#4CAF50"
-            />
-          </TouchableOpacity>
-        )}
         {product.featured_type && (
           <View
             style={[
@@ -1996,9 +2057,6 @@ const Products = () => {
       <View style={styles.titleContainer}>
         <View style={styles.titleLeft}>
           <Text style={styles.title}>{category.name}</Text>
-          <Text style={styles.count}>
-            {products.length} {t('items')}
-          </Text>
         </View>
         {/* View Toggle Buttons */}
         <View style={styles.viewToggleContainer}>
@@ -2008,7 +2066,7 @@ const Products = () => {
               setLayout(true);
               setTinderMode(false);
             }}>
-            <Ionicons name="grid" size={18} color={!tinderMode && layout ? '#F53F7A' : '#666'} />
+            <Ionicons name="grid" size={16} color={!tinderMode && layout ? '#F53F7A' : '#666'} />
             <Text style={[styles.viewToggleText, !tinderMode && layout && styles.activeViewToggleText]}>
               Grid
             </Text>
@@ -2020,7 +2078,7 @@ const Products = () => {
               setLayout(true);
               setTinderMode(true);
             }}>
-            <Ionicons name="layers" size={18} color={tinderMode ? '#F53F7A' : '#666'} />
+            <Ionicons name="layers" size={16} color={tinderMode ? '#F53F7A' : '#666'} />
             <Text style={[styles.viewToggleText, tinderMode && styles.activeViewToggleText]}>
               Swipe
             </Text>
@@ -2030,7 +2088,7 @@ const Products = () => {
           <TouchableOpacity
             style={styles.filterButton}
             onPress={() => setFilterSheetVisible(true)}>
-            <Ionicons name="filter-outline" size={18} color="#666" />
+            <Ionicons name="filter-outline" size={16} color="#666" />
             <Text style={styles.filterButtonText}>Filter</Text>
           </TouchableOpacity>
         </View>
@@ -2051,13 +2109,13 @@ const Products = () => {
       ) : layout && tinderMode ? (
         // Tinder Mode
         <View style={[styles.tinderModeContainer, { 
-          paddingTop: 20,
-          paddingBottom: Math.max(insets.bottom + 15, 25), // Increased for better button visibility
-          height: screenHeight - insets.top - insets.bottom - 120
+          paddingTop: 4,
+          paddingBottom: 12,
+          height: screenHeight - insets.top - (screenHeight <= 667 ? 70 : screenHeight <= 812 ? 80 : 90)
         }]}>
           <CustomSwipeView 
             products={products}
-            cardHeight={dynamicCardHeight}
+            cardHeight={cardHeight}
             onSwipeRight={handleSwipeRight}
             onSwipeLeft={handleSwipeLeft}
             navigation={navigation}
@@ -2292,8 +2350,8 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start',
     alignItems: 'center',
     position: 'relative',
-    paddingTop: 10, // Reduced from 20 to extend card more
-    paddingBottom: 20, // Increased from 10 to 20 for better button spacing
+    paddingTop: 8,
+    paddingBottom: 12,
   },
   stackedCard: {
     position: 'absolute',
@@ -2405,10 +2463,10 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingVertical: 6,
   },
   logo: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: '800',
     color: '#1a1a1a',
     letterSpacing: -0.5,
@@ -2852,39 +2910,33 @@ const styles = StyleSheet.create({
   productCard: {
     flex: 1,
     backgroundColor: '#fff',
-    borderRadius: 12,
+    borderRadius: 0, // Myntra style - no rounded corners
     position: 'relative',
-    margin: 4,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    margin: 2, // Minimal margin
+    borderWidth: 0.5,
+    borderColor: '#f0f0f0',
+    // No shadows for cleaner look
   },
   featuredBadge: {
     position: 'absolute',
     top: 8,
     left: 8,
-    borderRadius: 12,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    borderRadius: 3, // Less rounded
+    paddingHorizontal: 8,
+    paddingVertical: 4,
     zIndex: 1,
   },
   featuredBadgeText: {
     color: '#fff',
-    fontSize: 10,
-    fontWeight: 'bold',
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
   productImage: {
     width: '100%',
-    height: 180,
+    height: 240, // Taller image - Myntra style
     resizeMode: 'cover',
-    borderTopLeftRadius: 12,
-    borderTopRightRadius: 12,
-    backgroundColor: '#f0f0f0',
+    backgroundColor: '#f9f9f9',
   },
   listImageContainer: {
     width: 80,
@@ -2901,21 +2953,21 @@ const styles = StyleSheet.create({
     backgroundColor: '#f0f0f0',
   },
   productInfo: {
-    padding: 10,
-    paddingBottom: 12,
+    padding: 12,
+    paddingBottom: 14,
   },
   productName: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#1a1a1a',
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#94969f', // Lighter color for product name
     paddingBottom: 4,
-    lineHeight: 16,
-    textTransform: 'uppercase',
+    lineHeight: 17,
+    letterSpacing: 0.2,
   },
   productDescription: {
     fontSize: 12,
-    color: '#666',
-    marginBottom: 8,
+    color: '#94969f', // Myntra's secondary text
+    marginBottom: 6,
     lineHeight: 16,
   },
   productMeta: {
@@ -2966,7 +3018,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 6,
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
@@ -2980,12 +3032,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#f8f9fa',
   },
   title: {
-    fontSize: 20,
+    fontSize: 16,
     fontWeight: '600',
     color: '#333',
   },
   count: {
-    fontSize: 14,
+    fontSize: 12,
     color: '#666',
   },
   offTag: {
@@ -3144,7 +3196,7 @@ const styles = StyleSheet.create({
   vendorName: {
     fontSize: 11,
     fontWeight: '700',
-    color: '#666',
+    color: '#282c3f',
     marginBottom: 4,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
@@ -3297,10 +3349,10 @@ const styles = StyleSheet.create({
   viewToggleButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
     borderRadius: 8,
-    gap: 6,
+    gap: 4,
   },
   activeViewToggle: {
     backgroundColor: '#fff',
@@ -3311,7 +3363,7 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   viewToggleText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
     color: '#666',
   },
@@ -3323,8 +3375,8 @@ const styles = StyleSheet.create({
   filterButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
     borderRadius: 8,
     backgroundColor: '#fff',
     shadowColor: '#000',
@@ -3335,7 +3387,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   filterButtonText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
     color: '#666',
   },
@@ -3481,14 +3533,38 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   swipeStockText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '600',
+    color: '#4CAF50',
+    fontSize: 13,
+    fontWeight: '700',
   },
   swipeMetaRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-start',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  swipeRatingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  swipeRatingValue: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#282c3f',
+  },
+  swipeReviewCount: {
+    fontSize: 12,
+    color: '#7e818c',
+  },
+  swipeStockBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#E8F5E9',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
   },
   swipeRatingBadge: {
     flexDirection: 'row',
@@ -3498,6 +3574,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 6,
     gap: 4,
+  },
+  swipeVariantsRow: {
+    marginBottom: 6,
+    gap: 4,
+  },
+  swipeVariantGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  swipeVariantLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#7e818c',
+  },
+  swipeVariantValues: {
+    fontSize: 12,
+    color: '#282c3f',
+    flex: 1,
   },
   swipeRatingText: {
     color: '#fff',
@@ -3510,37 +3605,56 @@ const styles = StyleSheet.create({
   },
   // swipeInfoPanel moved to dynamic styles
   swipeProductInfoHeader: {
-    marginBottom: 10,
-  },
-  swipeVendorName: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#666',
-    textTransform: 'uppercase',
-    letterSpacing: 1,
     marginBottom: 4,
   },
-  swipeProductTitle: {
-    fontSize: 18,
+  swipeVendorName: {
+    fontSize: 11,
     fontWeight: '700',
-    color: '#111',
-    lineHeight: 24,
+    color: '#282c3f',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom: 3,
+  },
+  swipeProductTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#94969f',
+    lineHeight: 18,
   },
   swipePriceRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 4,
+  },
+  swipePriceGroup: {
+    flexDirection: 'column',
+    gap: 2,
+  },
+  swipeMRPText: {
+    fontSize: 12,
+    color: '#7e818c',
+    fontWeight: '500',
+  },
+  swipeMRPStrike: {
+    fontSize: 15,
+    color: '#999',
+    textDecorationLine: 'line-through',
+    fontWeight: '500',
+  },
+  swipeStrikethrough: {
+    textDecorationLine: 'line-through',
+    color: '#7e818c',
   },
   swipePriceContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
   },
   swipePrice: {
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: '800',
-    color: '#333',
+    color: '#282c3f',
     letterSpacing: 0.3,
   },
   swipeOriginalPriceText: {
@@ -3556,14 +3670,19 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
   },
   swipeDiscountText: {
-    color: '#fff',
-    fontSize: 11,
+    color: '#ff905a',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  swipeDiscountBadge: {
+    color: '#ff905a',
+    fontSize: 14,
     fontWeight: '700',
-    letterSpacing: 0.3,
   },
   swipeButtonRow: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 10,
+    marginTop: -8,
   },
   swipeTryButton: {
     flex: 1,
@@ -3571,22 +3690,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#fff',
-    borderWidth: 2,
+    borderWidth: 1.5,
     borderColor: '#F53F7A',
-    borderRadius: 14,
-    paddingVertical: 16, // Increased from 14
+    borderRadius: 12,
+    paddingVertical: 12,
     gap: 6,
     shadowColor: '#F53F7A',
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 6,
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 4,
   },
   swipeTryButtonText: {
     color: '#F53F7A',
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '700',
-    letterSpacing: 0.3,
+    letterSpacing: 0.5,
   },
   swipeShopButton: {
     flex: 1,
@@ -3594,21 +3713,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#F53F7A',
-    borderRadius: 14,
-    paddingVertical: 16, // Increased from 14
+    borderRadius: 12,
+    paddingVertical: 12,
     gap: 6,
     shadowColor: '#F53F7A',
-    shadowOpacity: 0.35,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 5 },
-    elevation: 8,
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
   },
   swipeShopButtonText: {
     color: '#fff',
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '700',
-    letterSpacing: 0.3,
+    letterSpacing: 0.5,
   },
 });
 
+export default Products;
 export default Products;

@@ -2,9 +2,10 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, ScrollView, Alert, Modal, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { supabase } from '~/utils/supabase';
 import { useUser } from '~/contexts/UserContext';
+import Toast from 'react-native-toast-message';
 
 interface UserAddress {
   id: string;
@@ -23,9 +24,14 @@ interface UserAddress {
 
 const AddressBook = () => {
   const navigation = useNavigation();
+  const route = useRoute();
   const { userData } = useUser();
   const [addresses, setAddresses] = useState<UserAddress[]>([]);
   const [loading, setLoading] = useState(false);
+  
+  // Check if we're in selection mode (coming from checkout)
+  const selectionMode = (route.params as any)?.selectMode || false;
+  const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null);
 
   // Form state
   const [formVisible, setFormVisible] = useState(false);
@@ -169,13 +175,28 @@ const AddressBook = () => {
     fetchAddresses();
   };
 
+  const handleSelectAddress = async (addr: UserAddress) => {
+    if (selectionMode) {
+      // Set as default and go back to checkout
+      await setDefaultAddress(addr.id);
+      Toast.show({
+        type: 'success',
+        text1: 'Address Selected',
+        text2: 'Delivery address updated',
+      });
+      navigation.goBack();
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color="#333" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Address Book</Text>
+        <Text style={styles.headerTitle}>
+          {selectionMode ? 'Select Delivery Address' : 'Address Book'}
+        </Text>
         <TouchableOpacity onPress={openCreate} style={styles.addButton}>
           <Ionicons name="add" size={24} color="#fff" />
         </TouchableOpacity>
@@ -183,14 +204,32 @@ const AddressBook = () => {
 
       <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
         {addresses.map(addr => (
-          <View key={addr.id} style={styles.card}>
+          <TouchableOpacity 
+            key={addr.id} 
+            style={[
+              styles.card,
+              selectionMode && selectedAddressId === addr.id && styles.selectedCard
+            ]}
+            onPress={() => selectionMode && handleSelectAddress(addr)}
+            disabled={!selectionMode}
+          >
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-              <View>
+              <View style={{ flex: 1 }}>
                 <Text style={styles.labelText}>{addr.label || 'Address'}</Text>
                 <Text style={styles.nameText}>{addr.full_name} • {addr.phone}</Text>
               </View>
-              {addr.is_default && (
-                <View style={styles.defaultPill}><Text style={styles.defaultPillText}>Default</Text></View>
+              {selectionMode ? (
+                <View style={styles.selectionIndicator}>
+                  <Ionicons 
+                    name={addr.is_default ? 'checkmark-circle' : 'radio-button-off'} 
+                    size={24} 
+                    color={addr.is_default ? '#F53F7A' : '#ccc'} 
+                  />
+                </View>
+              ) : (
+                addr.is_default && (
+                  <View style={styles.defaultPill}><Text style={styles.defaultPillText}>Default</Text></View>
+                )
               )}
             </View>
             <Text style={styles.addressText}>
@@ -200,20 +239,22 @@ const AddressBook = () => {
             <Text style={styles.addressText}>
               {addr.city}, {addr.state} {addr.postal_code}
             </Text>
-            <View style={styles.cardActions}>
-              {!addr.is_default && (
-                <TouchableOpacity style={styles.actionPill} onPress={() => setDefaultAddress(addr.id)}>
-                  <Text style={styles.actionPillText}>Set Default</Text>
+            {!selectionMode && (
+              <View style={styles.cardActions}>
+                {!addr.is_default && (
+                  <TouchableOpacity style={styles.actionPill} onPress={() => setDefaultAddress(addr.id)}>
+                    <Text style={styles.actionPillText}>Set Default</Text>
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity style={styles.actionPill} onPress={() => openEdit(addr)}>
+                  <Text style={styles.actionPillText}>Edit</Text>
                 </TouchableOpacity>
-              )}
-              <TouchableOpacity style={styles.actionPill} onPress={() => openEdit(addr)}>
-                <Text style={styles.actionPillText}>Edit</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.actionPill, { backgroundColor: '#fee2e2' }]} onPress={() => deleteAddress(addr.id)}>
-                <Text style={[styles.actionPillText, { color: '#b91c1c' }]}>Delete</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
+                <TouchableOpacity style={[styles.actionPill, { backgroundColor: '#fee2e2' }]} onPress={() => deleteAddress(addr.id)}>
+                  <Text style={[styles.actionPillText, { color: '#b91c1c' }]}>Delete</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </TouchableOpacity>
         ))}
         {addresses.length === 0 && (
           <View style={{ padding: 16 }}>
@@ -236,13 +277,13 @@ const AddressBook = () => {
                 <Text style={styles.inputLabel}>Label</Text>
                 <TextInput style={styles.input} placeholder="Home / Work" value={label} onChangeText={setLabel} />
 
-                <Text style={styles.inputLabel}>Full Name</Text>
+                <Text style={styles.inputLabel}>Full Name <Text style={styles.requiredStar}>*</Text></Text>
                 <TextInput style={styles.input} placeholder="Receiver's name" value={fullName} onChangeText={setFullName} />
 
-                <Text style={styles.inputLabel}>Phone</Text>
+                <Text style={styles.inputLabel}>Phone <Text style={styles.requiredStar}>*</Text></Text>
                 <TextInput style={styles.input} placeholder="Phone number" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
 
-                <Text style={styles.inputLabel}>Street Address 1</Text>
+                <Text style={styles.inputLabel}>Street Address 1 <Text style={styles.requiredStar}>*</Text></Text>
                 <TextInput style={styles.input} placeholder="House no, Street" value={line1} onChangeText={setLine1} />
 
                 <Text style={styles.inputLabel}>Street Address 2 (Optional)</Text>
@@ -253,22 +294,22 @@ const AddressBook = () => {
 
                 <View style={styles.row}>
                   <View style={{ flex: 1, marginRight: 8 }}>
-                    <Text style={styles.inputLabel}>City</Text>
+                    <Text style={styles.inputLabel}>City <Text style={styles.requiredStar}>*</Text></Text>
                     <TextInput style={styles.input} placeholder="City" value={city} onChangeText={setCity} />
                   </View>
                   <View style={{ flex: 1, marginLeft: 8 }}>
-                    <Text style={styles.inputLabel}>State</Text>
+                    <Text style={styles.inputLabel}>State <Text style={styles.requiredStar}>*</Text></Text>
                     <TextInput style={styles.input} placeholder="State" value={stateName} onChangeText={setStateName} />
                   </View>
                 </View>
 
                 <View style={styles.row}>
                   <View style={{ flex: 1, marginRight: 8 }}>
-                    <Text style={styles.inputLabel}>Postal Code</Text>
+                    <Text style={styles.inputLabel}>Postal Code <Text style={styles.requiredStar}>*</Text></Text>
                     <TextInput style={styles.input} placeholder="Pincode" value={postalCode} onChangeText={setPostalCode} keyboardType="numeric" />
                   </View>
                   <View style={{ flex: 1, marginLeft: 8 }}>
-                    <Text style={styles.inputLabel}>Country</Text>
+                    <Text style={styles.inputLabel}>Country <Text style={styles.requiredStar}>*</Text></Text>
                     <TextInput style={styles.input} placeholder="Country" value={country} onChangeText={setCountry} />
                   </View>
                 </View>
@@ -303,6 +344,8 @@ const styles = StyleSheet.create({
   backButton: { padding: 6 },
   addButton: { backgroundColor: '#F53F7A', padding: 8, borderRadius: 8 },
   card: { backgroundColor: '#fff', borderRadius: 12, marginHorizontal: 16, marginTop: 12, padding: 16, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 2 },
+  selectedCard: { borderWidth: 2, borderColor: '#F53F7A', backgroundColor: '#FFF5F7' },
+  selectionIndicator: { marginLeft: 12 },
   labelText: { fontSize: 14, fontWeight: '700', color: '#111' },
   nameText: { fontSize: 12, color: '#6B7280', marginTop: 2 },
   addressText: { fontSize: 14, color: '#374151', marginTop: 6 },
@@ -316,6 +359,7 @@ const styles = StyleSheet.create({
   modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#eee' },
   modalTitle: { fontSize: 18, fontWeight: '700', color: '#111' },
   inputLabel: { fontSize: 12, fontWeight: '700', color: '#6B7280', marginTop: 12, marginBottom: 6 },
+  requiredStar: { color: '#ef4444', fontSize: 14, fontWeight: '700' },
   input: { borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, color: '#111' },
   row: { flexDirection: 'row', marginTop: 4 },
   modalFooter: { flexDirection: 'row', justifyContent: 'space-between', padding: 16, borderTopWidth: 1, borderTopColor: '#eee' },

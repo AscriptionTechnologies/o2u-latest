@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, FlatList, SafeAreaView, Dimensions, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, FlatList, Dimensions, ActivityIndicator, Share, Linking, Alert } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useWishlist } from '~/contexts/WishlistContext';
@@ -9,6 +10,8 @@ import { supabase } from '~/utils/supabase';
 import { useUser } from '~/contexts/UserContext';
 import { useTranslation } from 'react-i18next';
 import { getFirstSafeImageUrl, getProductImages, getFirstSafeProductImage, preferApiRenderedImageFirst, getSafeImageUrl } from '../utils/imageUtils';
+import Toast from 'react-native-toast-message';
+import { Clipboard } from 'react-native';
 
 const { width } = Dimensions.get('window');
 
@@ -92,7 +95,14 @@ const Wishlist = () => {
               const productIds = collectionProducts.map((cp: any) => cp.product_id);
               const { data: products } = await supabase
                 .from('products')
-                .select('image_urls')
+                .select(`
+                  image_urls,
+                  video_urls,
+                  variants:product_variants(
+                    image_urls,
+                    video_urls
+                  )
+                `)
                 .in('id', productIds)
                 .limit(4);
 
@@ -139,7 +149,10 @@ const Wishlist = () => {
   }, [userData?.id, wishlist]);
 
   // Real counts for badges
-  const regularWishlistItems = wishlist.filter(item => !item.isPersonalized);
+  // Filter out personalized items AND items that are in any collection
+  const regularWishlistItems = wishlist.filter(item => 
+    !item.isPersonalized && !productCollections[item.id]
+  );
   const wishlistCount = regularWishlistItems.length;
   const previewCount = previewProducts.length;
   const notificationsCount = notifications.filter(n => n.unread).length;
@@ -149,6 +162,80 @@ const Wishlist = () => {
     { key: 'wishlist', label: 'wishlist', icon: 'heart-outline', badge: wishlistCount },
     { key: 'preview', label: 'your_preview', icon: 'person-outline', badge: previewCount },
   ];
+
+  // Handle collection sharing
+  const handleShareCollection = async (collection: Collection) => {
+    try {
+      // Enable sharing and get/create share token
+      const { data: shareData, error: shareError } = await supabase
+        .rpc('enable_collection_sharing', { collection_uuid: collection.id });
+
+      if (shareError) {
+        console.error('Error enabling sharing:', shareError);
+        Toast.show({
+          type: 'error',
+          text1: 'Sharing Failed',
+          text2: 'Could not generate share link',
+        });
+        return;
+      }
+
+      const shareToken = shareData;
+      const shareUrl = `only2u://shared-collection/${shareToken}`;
+      const shareMessage = `Check out my collection "${collection.name}" with ${collection.item_count} items on Only2U!\n\n${shareUrl}`;
+
+      // Show share options
+      Alert.alert(
+        'Share Collection',
+        'Choose how to share this collection',
+        [
+          {
+            text: 'WhatsApp',
+            onPress: async () => {
+              const whatsappUrl = `whatsapp://send?text=${encodeURIComponent(shareMessage)}`;
+              const canOpen = await Linking.canOpenURL(whatsappUrl);
+              if (canOpen) {
+                await Linking.openURL(whatsappUrl);
+                // Increment share count
+                await supabase
+                  .from('collections')
+                  .update({ share_count: collection.item_count + 1 })
+                  .eq('id', collection.id);
+              } else {
+                Toast.show({
+                  type: 'error',
+                  text1: 'WhatsApp not installed',
+                  text2: 'Please install WhatsApp to share',
+                });
+              }
+            },
+          },
+          {
+            text: 'Copy Link',
+            onPress: () => {
+              Clipboard.setString(shareUrl);
+              Toast.show({
+                type: 'success',
+                text1: 'Link Copied!',
+                text2: 'Share link copied to clipboard',
+              });
+            },
+          },
+          {
+            text: 'Cancel',
+            style: 'cancel',
+          },
+        ]
+      );
+    } catch (error) {
+      console.error('Error sharing collection:', error);
+      Toast.show({
+        type: 'error',
+        text1: 'Error',
+        text2: 'Failed to share collection',
+      });
+    }
+  };
 
   const renderTab = (tab: any) => (
     <TouchableOpacity
@@ -181,7 +268,10 @@ const Wishlist = () => {
       <TouchableOpacity
         style={[styles.collectionFolder, { width: folderSize }]}
         onPress={() => {
-          (navigation as any).navigate('CollectionDetails', { collection: item });
+          (navigation as any).navigate('CollectionDetails', { 
+            collectionId: item.id,
+            collectionName: item.name
+          });
         }}
         activeOpacity={0.8}
       >
@@ -222,12 +312,25 @@ const Wishlist = () => {
 
         {/* Folder Info */}
         <View style={styles.folderInfo}>
-          <Text style={styles.folderName} numberOfLines={1}>
-            {item.name}
-          </Text>
-          <Text style={styles.folderCount}>
-            {item.item_count} {item.item_count === 1 ? 'item' : 'items'}
-          </Text>
+          <View style={styles.folderInfoRow}>
+            <View style={styles.folderTextContainer}>
+              <Text style={styles.folderName} numberOfLines={1}>
+                {item.name}
+              </Text>
+              <Text style={styles.folderCount}>
+                {item.item_count} {item.item_count === 1 ? 'item' : 'items'}
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={styles.shareButton}
+              onPress={async (e) => {
+                e.stopPropagation();
+                await handleShareCollection(item);
+              }}
+            >
+              <Ionicons name="share-outline" size={20} color="#F53F7A" />
+            </TouchableOpacity>
+          </View>
         </View>
       </TouchableOpacity>
     );
@@ -398,7 +501,10 @@ const Wishlist = () => {
     const previewSafe = Array.isArray(previewProducts) ? previewProducts : [];
     switch (activeTab) {
       case 'wishlist':
-        const regularWishlistItems = wishlistSafe.filter(item => !item.isPersonalized);
+        // Filter out personalized items AND items that are in any collection
+        const regularWishlistItems = wishlistSafe.filter(item => 
+          !item.isPersonalized && !productCollections[item.id]
+        );
         
         if (loadingCollections) {
           return (
@@ -997,6 +1103,15 @@ const styles = StyleSheet.create({
     padding: 12,
     backgroundColor: '#fff',
   },
+  folderInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  folderTextContainer: {
+    flex: 1,
+    marginRight: 8,
+  },
   folderName: {
     fontSize: 15,
     fontWeight: '600',
@@ -1006,6 +1121,11 @@ const styles = StyleSheet.create({
   folderCount: {
     fontSize: 13,
     color: '#666',
+  },
+  shareButton: {
+    padding: 8,
+    backgroundColor: '#FFE8F0',
+    borderRadius: 20,
   },
   allItemsHeader: {
     flexDirection: 'row',

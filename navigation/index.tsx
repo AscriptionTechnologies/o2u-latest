@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, View, Text, Button } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, View, Text, Button, Linking } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useTranslation } from 'react-i18next';
@@ -37,6 +37,7 @@ import VendorProfile from '~/screens/VendorProfile';
 import ResellerRegistration from '~/screens/ResellerRegistration';
 import ResellerDashboardSimple from '~/screens/ResellerDashboardSimple';
 import CatalogShare from '~/screens/CatalogShare';
+import ProductDetails from '~/screens/ProductDetails';
 import { useUser } from '~/contexts/UserContext';
 
 const Stack = createNativeStackNavigator();
@@ -87,6 +88,7 @@ const Navigation = () => {
       <Stack.Screen name="ResellerRegistration" component={ResellerRegistration} options={{ headerShown: false }} />
       <Stack.Screen name="ResellerDashboard" component={ResellerDashboardSimple} options={{ headerShown: false }} />
       <Stack.Screen name="CatalogShare" component={CatalogShare} options={{ headerShown: false }} />
+      <Stack.Screen name="ProductDetails" component={ProductDetails} options={{ headerShown: false }} />
     </Stack.Navigator>
   );
 };
@@ -212,10 +214,59 @@ const HandleNavigation = () => {
 };
 
 export default function RootStack() {
+  const linking = {
+    prefixes: ['only2u://', 'https://only2u.app', 'https://*.only2u.app'],
+    config: {
+      screens: {
+        TabNavigator: {
+          screens: {
+            Home: {
+              screens: {
+                Home: 'home',
+                SharedCollection: 'shared-collection/:shareToken',
+                ProductDetails: 'product/:productId',
+                Products: 'products/:categoryId',
+                CollectionDetails: 'collection/:collectionId',
+              },
+            },
+          },
+        },
+      },
+    },
+  };
+
+  // Handle deep links when app is already open
+  useEffect(() => {
+    const subscription = Linking.addEventListener('url', ({ url }) => {
+      console.log('Deep link received:', url);
+      // Navigation will be handled automatically by linking config
+    });
+
+    // Handle initial URL when app is opened via deep link
+    Linking.getInitialURL().then((url) => {
+      if (url) {
+        console.log('Initial deep link:', url);
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
   return (
     <Provider>
       <VendorProvider>
-        <NavigationContainer>
+        <NavigationContainer 
+          linking={linking}
+          fallback={<View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}><ActivityIndicator size="large" color="#F53F7A" /></View>}
+          onReady={() => {
+            console.log('Navigation is ready');
+          }}
+          onStateChange={(state) => {
+            console.log('Navigation state changed:', state?.routes?.[0]?.name);
+          }}
+        >
           <HandleNavigation />
         </NavigationContainer>
       </VendorProvider>

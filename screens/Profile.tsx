@@ -12,6 +12,7 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -24,6 +25,8 @@ import { supabase } from '~/utils/supabase';
 import { useTranslation } from 'react-i18next';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Toast from 'react-native-toast-message';
+import * as ImagePicker from 'expo-image-picker';
+import { uploadProfilePhoto, validateImage } from '~/utils/profilePhotoUpload';
 
 type RootStackParamList = {
   TermsAndConditions: undefined;
@@ -57,6 +60,10 @@ const Profile = () => {
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [name, setName] = useState('');
   const [creatingProfile, setCreatingProfile] = useState(false);
+  
+  // Profile photo upload state
+  const [showPhotoPickerModal, setShowPhotoPickerModal] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
   // Sync user data from useAuth to useUser if userData is null but user has data
   useEffect(() => {
@@ -331,6 +338,144 @@ const Profile = () => {
     resetSheetState();
   };
 
+  // Profile photo upload functions
+  const requestCameraPermissions = async () => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert(
+        'Camera Permission Required',
+        'Please grant camera permissions to take a profile picture.',
+        [{ text: 'OK' }]
+      );
+      return false;
+    }
+    return true;
+  };
+
+  const requestGalleryPermissions = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert(
+        'Gallery Permission Required',
+        'Please grant gallery permissions to select a profile picture.',
+        [{ text: 'OK' }]
+      );
+      return false;
+    }
+    return true;
+  };
+
+  const takePhoto = async () => {
+    const hasPermission = await requestCameraPermissions();
+    if (!hasPermission) return;
+
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+
+    if (!result.canceled && result.assets[0]) {
+      await handlePhotoUpload(result.assets[0].uri);
+    }
+    setShowPhotoPickerModal(false);
+  };
+
+  const pickFromGallery = async () => {
+    const hasPermission = await requestGalleryPermissions();
+    if (!hasPermission) return;
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+
+    if (!result.canceled && result.assets[0]) {
+      await handlePhotoUpload(result.assets[0].uri);
+    }
+    setShowPhotoPickerModal(false);
+  };
+
+  const handlePhotoUpload = async (uri: string) => {
+    if (!userData?.id) {
+      Toast.show({
+        type: 'error',
+        text1: 'Not Logged In',
+        text2: 'Please log in to update your profile photo',
+      });
+      return;
+    }
+
+    try {
+      setUploadingPhoto(true);
+
+      // Validate the image first
+      const validation = await validateImage(uri);
+      if (!validation.valid) {
+        Toast.show({
+          type: 'error',
+          text1: 'Invalid Image',
+          text2: validation.error || 'Please select a valid image file.',
+        });
+        return;
+      }
+
+      // Upload the image
+      const result = await uploadProfilePhoto(uri);
+
+      if (result.success && result.url) {
+        // Update user profile in database
+        const { error: updateError } = await supabase
+          .from('users')
+          .update({ profilePhoto: result.url })
+          .eq('id', userData.id);
+
+        if (updateError) {
+          throw updateError;
+        }
+
+        // Refresh user data to show new photo
+        await refreshUserData();
+
+        Toast.show({
+          type: 'success',
+          text1: 'Photo Updated',
+          text2: 'Your profile photo has been updated successfully!',
+        });
+      } else {
+        Toast.show({
+          type: 'error',
+          text1: 'Upload Failed',
+          text2: result.error || 'Failed to upload profile picture. Please try again.',
+        });
+      }
+    } catch (error) {
+      console.error('Error uploading photo:', error);
+      Toast.show({
+        type: 'error',
+        text1: 'Upload Error',
+        text2: 'An error occurred while uploading your picture.',
+      });
+    } finally {
+      setUploadingPhoto(false);
+    }
+  };
+
+  const handlePhotoPress = () => {
+    if (!userData?.id) {
+      Toast.show({
+        type: 'info',
+        text1: 'Login Required',
+        text2: 'Please log in to update your profile photo',
+      });
+      return;
+    }
+    setShowPhotoPickerModal(true);
+  };
+
   return (
     <View style={styles.container}>
       {/* Header */}
@@ -366,6 +511,18 @@ const Profile = () => {
                     <Ionicons name="person" size={40} color="#F53F7A" />
                   </View>
                 )}
+                {/* Camera/Edit Button */}
+                <TouchableOpacity
+                  style={styles.cameraButton}
+                  onPress={handlePhotoPress}
+                  disabled={uploadingPhoto}
+                >
+                  {uploadingPhoto ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Ionicons name="camera" size={18} color="#fff" />
+                  )}
+                </TouchableOpacity>
               </View>
               <View style={styles.profileTextContainer}>
                 <Text style={styles.userName}>
@@ -691,6 +848,69 @@ const Profile = () => {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      {/* Photo Picker Modal */}
+      <Modal
+        visible={showPhotoPickerModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowPhotoPickerModal(false)}
+      >
+        <View style={styles.photoPickerOverlay}>
+          <TouchableOpacity 
+            style={styles.photoPickerBackdrop}
+            activeOpacity={1}
+            onPress={() => setShowPhotoPickerModal(false)}
+          />
+          <View style={styles.photoPickerContent}>
+            {/* Drag Handle */}
+            <View style={styles.dragHandle} />
+            
+            <View style={styles.photoPickerHeader}>
+              <Text style={styles.photoPickerTitle}>Update Profile Photo</Text>
+              <Text style={styles.photoPickerSubtitle}>Choose how you want to upload your photo</Text>
+            </View>
+            
+            <TouchableOpacity 
+              style={styles.photoPickerOption}
+              onPress={takePhoto}
+              activeOpacity={0.7}
+            >
+              <View style={styles.photoPickerOptionIcon}>
+                <Ionicons name="camera" size={24} color="#fff" />
+              </View>
+              <View style={styles.photoPickerOptionTextContainer}>
+                <Text style={styles.photoPickerOptionTitle}>Take Photo</Text>
+                <Text style={styles.photoPickerOptionSubtitle}>Use camera to capture a new photo</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color="#999" />
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.photoPickerOption}
+              onPress={pickFromGallery}
+              activeOpacity={0.7}
+            >
+              <View style={styles.photoPickerOptionIcon}>
+                <Ionicons name="images" size={24} color="#fff" />
+              </View>
+              <View style={styles.photoPickerOptionTextContainer}>
+                <Text style={styles.photoPickerOptionTitle}>Choose from Gallery</Text>
+                <Text style={styles.photoPickerOptionSubtitle}>Select from your photo library</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color="#999" />
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={styles.cancelButton}
+              onPress={() => setShowPhotoPickerModal(false)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.cancelButtonText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -735,6 +955,7 @@ const styles = StyleSheet.create({
   },
   avatarContainer: {
     marginRight: 20,
+    position: 'relative',
   },
   avatar: {
     width: 80,
@@ -752,6 +973,24 @@ const styles = StyleSheet.create({
     borderRadius: 50,
     borderWidth: 2,
     borderColor: '#F53F7A',
+  },
+  cameraButton: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#F53F7A',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    elevation: 4,
   },
   profileTextContainer: {
     flex: 1,
@@ -955,6 +1194,111 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  // Photo Picker Modal styles
+  photoPickerOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  photoPickerBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  photoPickerContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 34,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  dragHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#D1D5DB',
+    alignSelf: 'center',
+    marginBottom: 20,
+  },
+  photoPickerHeader: {
+    marginBottom: 24,
+  },
+  photoPickerTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#111',
+    marginBottom: 6,
+  },
+  photoPickerSubtitle: {
+    fontSize: 14,
+    color: '#6B7280',
+    lineHeight: 20,
+  },
+  photoPickerOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    borderRadius: 16,
+    backgroundColor: '#fff',
+    marginBottom: 12,
+    borderWidth: 1.5,
+    borderColor: '#E5E7EB',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  photoPickerOptionIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: '#F53F7A',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 16,
+    shadowColor: '#F53F7A',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  photoPickerOptionTextContainer: {
+    flex: 1,
+  },
+  photoPickerOptionTitle: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#111',
+    marginBottom: 3,
+  },
+  photoPickerOptionSubtitle: {
+    fontSize: 13,
+    color: '#6B7280',
+    lineHeight: 18,
+  },
+  cancelButton: {
+    marginTop: 8,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 16,
+    backgroundColor: '#F3F4F6',
+    alignItems: 'center',
+  },
+  cancelButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#374151',
   },
 });
 

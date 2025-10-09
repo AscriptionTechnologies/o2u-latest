@@ -11,7 +11,9 @@ import {
   Animated,
   Platform,
   RefreshControl,
+  Alert,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -26,10 +28,25 @@ import { getFirstSafeImageUrl, getProductImages, getFirstSafeProductImage } from
 import type { Product, Category } from '~/types/product';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
+import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 
 type DashboardNavigationProp = StackNavigationProp<RootStackParamList>;
 
 const HEADER_HEIGHT = 64;
+
+interface Address {
+  id: string;
+  user_id: string;
+  full_name: string;
+  phone: string;
+  address_line1: string;
+  address_line2?: string;
+  city: string;
+  state: string;
+  pincode: string;
+  is_default: boolean;
+  created_at?: string;
+}
 
 const Dashboard = () => {
   const navigation = useNavigation<DashboardNavigationProp>();
@@ -50,8 +67,15 @@ const Dashboard = () => {
   const { t } = useTranslation();
   const [langMenuVisible, setLangMenuVisible] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
+  const [addresses, setAddresses] = useState<Address[]>([]);
+  const [selectedAddress, setSelectedAddress] = useState<Address | null>(null);
+  const [addressSheetVisible, setAddressSheetVisible] = useState(false);
+  const addressSheetRef = useRef<BottomSheet>(null);
   const [productRatings, setProductRatings] = useState<{ [productId: string]: { rating: number; reviews: number } }>({});
   const [imageLoadingStates, setImageLoadingStates] = useState<{ [productId: string]: 'loading' | 'loaded' | 'error' }>({});
+  const [pincode, setPincode] = useState('');
+  const [checkingPincode, setCheckingPincode] = useState(false);
+  const [pincodeAvailable, setPincodeAvailable] = useState<boolean | null>(null);
   const shimmerAnimation = useRef(new Animated.Value(0)).current;
   
   // Cache for data
@@ -72,6 +96,10 @@ const Dashboard = () => {
     loadDashboardData();
     // Attempt to capture GPS and city on first mount
     captureLocationIfMissing();
+    // Load user addresses
+    if (userData?.id) {
+      fetchAddresses();
+    }
     
     // Fallback: turn off loading after 10 seconds to prevent infinite loading
     const timeout = setTimeout(() => {
@@ -81,7 +109,91 @@ const Dashboard = () => {
     }, 10000);
 
     return () => clearTimeout(timeout);
-  }, []);
+  }, [userData?.id]);
+
+  // Fetch user addresses
+  const fetchAddresses = async () => {
+    if (!userData?.id) return;
+    
+    try {
+      const { data, error } = await supabase
+        .from('user_addresses')
+        .select('*')
+        .eq('user_id', userData.id)
+        .order('is_default', { ascending: false })
+        .order('created_at', { ascending: false });
+      
+      if (error) {
+        console.error('Error fetching addresses:', error);
+        return;
+      }
+      
+      setAddresses(data || []);
+      const defaultAddr = data?.find((addr: Address) => addr.is_default);
+      if (defaultAddr) {
+        setSelectedAddress(defaultAddr);
+      } else if (data && data.length > 0) {
+        setSelectedAddress(data[0]);
+      }
+    } catch (error) {
+      console.error('Error in fetchAddresses:', error);
+    }
+  };
+
+  // Handle address selection
+  const handleAddressSelect = async (address: Address) => {
+    setSelectedAddress(address);
+    setAddressSheetVisible(false);
+    addressSheetRef.current?.close();
+  };
+
+  // Check pincode availability
+  const handleCheckPincode = async () => {
+    if (!pincode || pincode.length !== 6) {
+      Toast.show({
+        type: 'error',
+        text1: 'Invalid Pincode',
+        text2: 'Please enter a valid 6-digit pincode',
+      });
+      return;
+    }
+
+    setCheckingPincode(true);
+    try {
+      // Simulated pincode check - in production, call your logistics API
+      // For now, we'll accept most pincodes but reject some for demo
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      const unavailablePincodes = ['000000', '111111', '999999'];
+      const isAvailable = !unavailablePincodes.includes(pincode);
+      
+      setPincodeAvailable(isAvailable);
+      
+      if (isAvailable) {
+        Toast.show({
+          type: 'success',
+          text1: 'Delivery Available! ✓',
+          text2: `We deliver to pincode ${pincode}`,
+        });
+      } else {
+        Toast.show({
+          type: 'error',
+          text1: 'Not Serviceable',
+          text2: `Sorry, we don't deliver to pincode ${pincode} yet`,
+        });
+      }
+    } catch (error) {
+      console.error('Error checking pincode:', error);
+      Toast.show({
+        type: 'error',
+        text1: 'Check Failed',
+        text2: 'Could not verify pincode availability',
+      });
+    } finally {
+      setCheckingPincode(false);
+    }
+  };
+
   const captureLocationIfMissing = async () => {
     try {
       // Only attempt if user is logged in and we don't have a location saved
@@ -776,117 +888,99 @@ const Dashboard = () => {
 
   return (
     <View style={styles.container}>
-      {/* Sticky header/search bar container */}
-      <View style={{ position: 'absolute', top: 0, left: 0, right: 0, height: HEADER_HEIGHT, backgroundColor: '#fff', zIndex: 1000 }}>
-        <Animated.View
-          style={{
-            opacity: searchBarAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }),
-            transform: [{ translateY: searchBarAnim.interpolate({ inputRange: [0, 1], outputRange: [0, -20] }) }],
-            height: HEADER_HEIGHT,
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            width: '100%',
-            zIndex: 1001,
-          }}
-        >
-          {/* Main Header */}
-          <View style={styles.header}>
-            {/* Safe area at top */}
-            <View style={styles.statusBarSpacer} />
-            <View style={styles.headerContent}>
-              <View>
-                <Text style={styles.logo}>
-                  <Text>Only</Text>
-                  <Text style={{ color: '#F53F7A' }}>2</Text>
-                  <Text>U</Text>
+      {/* Enhanced Header with Integrated Search */}
+      <SafeAreaView edges={['top']} style={styles.safeHeader}>
+        <View style={styles.header}>
+          {/* Top Row: Logo + Actions */}
+          <View style={styles.headerTopRow}>
+            <View style={styles.logoContainer}>
+              <Text style={styles.logo}>
+                <Text>Only</Text>
+                <Text style={{ color: '#F53F7A' }}>2</Text>
+                <Text>U</Text>
+              </Text>
+              <TouchableOpacity 
+                style={styles.locationRow}
+                onPress={() => {
+                  setAddressSheetVisible(true);
+                  addressSheetRef.current?.expand();
+                }}
+              >
+                <Ionicons name="location" size={12} color="#F53F7A" />
+                <Text style={styles.cityText}>
+                  {selectedAddress 
+                    ? `${selectedAddress.city}, ${selectedAddress.state}` 
+                    : userData?.location || 'Select location'}
                 </Text>
-                {!!userData?.location && (
-                  <Text style={styles.cityText}>{userData.location}</Text>
+                <Ionicons name="chevron-down" size={12} color="#6B7280" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.headerRight}>
+              <View style={styles.languageContainer}>
+                <TouchableOpacity 
+                  onPress={() => setLangMenuVisible(v => !v)} 
+                  style={styles.langButton}
+                >
+                  <Ionicons name="globe-outline" size={16} color="#8f5be8" />
+                  <Text style={styles.languageText}>{i18n.language === 'te' ? 'TE' : 'EN'}</Text>
+                </TouchableOpacity>
+                {langMenuVisible && (
+                  <View style={styles.langMenuDropdown}>
+                    <TouchableOpacity
+                      style={[styles.langMenuItem, i18n.language === 'en' && styles.langMenuItemActive]}
+                      onPress={() => { i18n.changeLanguage('en'); setLangMenuVisible(false); }}
+                    >
+                      <Text style={styles.langMenuText}>{t('english')}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.langMenuItem, i18n.language === 'te' && styles.langMenuItemActive]}
+                      onPress={() => { i18n.changeLanguage('te'); setLangMenuVisible(false); }}
+                    >
+                      <Text style={styles.langMenuText}>{t('telugu')} (Telugu)</Text>
+                    </TouchableOpacity>
+                  </View>
                 )}
               </View>
-
-              <View style={styles.headerRight}>
-                <View style={styles.languageContainer}>
-                  <TouchableOpacity onPress={() => {
-                    setLangMenuVisible(v => !v);
-                  }} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                    <Ionicons name="globe-outline" size={18} color="#8f5be8" />
-                    <Text style={[styles.languageText, { color: '#2d334d', fontWeight: '600' }]}>{i18n.language === 'te' ? 'TE' : 'EN'}</Text>
-                  </TouchableOpacity>
-                  {langMenuVisible && (
-                    <View style={{ position: 'absolute', top: 32, right: 0, backgroundColor: '#f7f8fa', borderRadius: 12, shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 4, minWidth: 120, zIndex: 100 }}>
-                      <TouchableOpacity
-                        style={{ padding: 12, borderTopLeftRadius: 12, borderTopRightRadius: 12, backgroundColor: i18n.language === 'en' ? '#f1f2f4' : 'transparent' }}
-                        onPress={() => { i18n.changeLanguage('en'); setLangMenuVisible(false); }}
-                      >
-                        <Text style={{ color: '#222', fontSize: 16 }}>{t('english')}</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={{ padding: 12, borderBottomLeftRadius: 12, borderBottomRightRadius: 12, backgroundColor: i18n.language === 'te' ? '#f1f2f4' : 'transparent' }}
-                        onPress={() => { i18n.changeLanguage('te'); setLangMenuVisible(false); }}
-                      >
-                        <Text style={{ color: '#222', fontSize: 18 }}>{t('telugu')} (Telugu)</Text>
-                      </TouchableOpacity>
-                    </View>
-                  )}
-                </View>
-                <View style={styles.currencyContainer}>
-                  <Text style={styles.currencyText}>{userData?.coin_balance || 0}</Text>
-                  <MaterialCommunityIcons name="face-man-shimmer" size={18} color="#F53F7A" />
-                </View>
-                <TouchableOpacity 
-                  style={styles.debugButton} 
-                  onPress={handleDebugReload}
-                >
-                  <Ionicons name="refresh" size={16} color="#F53F7A" />
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.iconButton} onPress={() => navigation.navigate('Wishlist')}>
-                  <Ionicons name="heart-outline" size={24} color="#333" />
-                  {wishlist.length > 0 && (
-                    <View style={styles.badge}>
-                      <Text style={styles.badgeText}>{wishlist.length}</Text>
-                    </View>
-                  )}
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.iconButton, { backgroundColor: userData?.profilePhoto ? 'transparent' : 'lightgray', borderRadius: 20, padding: 7 }]}
-                  onPress={() => navigation.navigate('Profile')}
-                >
-                  {userData?.profilePhoto ? (
-                    <Image source={{ uri: userData.profilePhoto }} style={styles.avatarImage} />
-                  ) : (
-                    <Ionicons name="person-outline" size={16} color="#333" />
-                  )}
-                </TouchableOpacity>
+              <View style={styles.coinBadge}>
+                <MaterialCommunityIcons name="face-man-shimmer" size={16} color="#F53F7A" />
+                <Text style={styles.coinText}>{userData?.coin_balance || 0}</Text>
               </View>
+              <TouchableOpacity style={styles.iconButton} onPress={() => navigation.navigate('Wishlist')}>
+                <Ionicons name="heart-outline" size={22} color="#333" />
+                {wishlist.length > 0 && (
+                  <View style={styles.badge}>
+                    <Text style={styles.badgeText}>{wishlist.length}</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.profileButton}
+                onPress={() => navigation.navigate('Profile')}
+              >
+                {userData?.profilePhoto ? (
+                  <Image source={{ uri: userData.profilePhoto }} style={styles.avatarImage} />
+                ) : (
+                  <Ionicons name="person-outline" size={16} color="#333" />
+                )}
+              </TouchableOpacity>
             </View>
           </View>
-        </Animated.View>
-        {/* Animated sticky search bar when scrolled */}
-        <Animated.View
-          style={{
-            opacity: searchBarAnim,
-            transform: [{ translateY: searchBarAnim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
-            height: HEADER_HEIGHT,
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            width: '100%',
-            backgroundColor: '#fff',
-            justifyContent: 'flex-end',
-            zIndex: 1000,
-          }}
-          pointerEvents={showSearchBar ? 'auto' : 'none'}
-        >
-          {/* Search Bar Only Header */}
-          <View style={styles.searchBarOnlyHeader}>
-            {showSearchBar && renderSearchBar()}
+
+          {/* Bottom Row: Integrated Search Bar */}
+          <View style={styles.searchBarIntegrated}>
+            <Ionicons name="search-outline" size={20} color="#888" />
+            <TextInput
+              style={styles.searchInput}
+              placeholder={t('search')}
+              placeholderTextColor="#888"
+              value={searchText}
+              onChangeText={setSearchText}
+              returnKeyType="search"
+            />
           </View>
-        </Animated.View>
-      </View>
+        </View>
+      </SafeAreaView>
 
       {/* Initial Loading Screen */}
       {isInitialLoading && !hasError ? (
@@ -1026,12 +1120,10 @@ const Dashboard = () => {
           </TouchableOpacity>
         </View>
       ) : (
-        <Animated.ScrollView
+        <ScrollView
           showsVerticalScrollIndicator={false}
-          style={[styles.scrollContent, { paddingTop: HEADER_HEIGHT }]}
+          style={styles.scrollContent}
           contentContainerStyle={styles.scrollContentContainer}
-          onScroll={handleScroll}
-          scrollEventThrottle={16}
           refreshControl={
             <RefreshControl
               refreshing={isRefreshing}
@@ -1041,12 +1133,6 @@ const Dashboard = () => {
             />
           }
         >
-        {/* Show search bar before Shop by Category when not scrolled */}
-        {!showSearchBar && (
-          <View style={styles.searchBarBeforeCategory}>
-            {renderSearchBar()}
-          </View>
-        )}
         {/* Shop by Category Section */}
         <View style={styles.sectionContainer}>
           {categories.length === 0 && !isInitialLoading ? (
@@ -1184,7 +1270,128 @@ const Dashboard = () => {
           </View>
         </View>
 
-        </Animated.ScrollView>
+        </ScrollView>
+      )}
+
+      {/* Address Selection Bottom Sheet */}
+      {addressSheetVisible && (
+        <BottomSheet
+          ref={addressSheetRef}
+          index={0}
+          snapPoints={['70%']}
+          enablePanDownToClose
+          onClose={() => setAddressSheetVisible(false)}
+        >
+          <BottomSheetScrollView style={styles.addressSheetContent}>
+            <View style={styles.addressSheetHeader}>
+              <Text style={styles.addressSheetTitle}>Select Delivery Address</Text>
+              <TouchableOpacity
+                style={styles.addNewAddressButton}
+                onPress={() => {
+                  setAddressSheetVisible(false);
+                  addressSheetRef.current?.close();
+                  navigation.navigate('AddressBook' as never);
+                }}
+              >
+                <Ionicons name="add-circle" size={20} color="#F53F7A" />
+                <Text style={styles.addNewAddressText}>Add New</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Pincode Availability Checker */}
+            <View style={styles.pincodeChecker}>
+              <Text style={styles.pincodeCheckerTitle}>Check Delivery Availability</Text>
+              <View style={styles.pincodeInputRow}>
+                <TextInput
+                  style={styles.pincodeInput}
+                  placeholder="Enter Pincode"
+                  value={pincode}
+                  onChangeText={setPincode}
+                  keyboardType="number-pad"
+                  maxLength={6}
+                  placeholderTextColor="#999"
+                />
+                <TouchableOpacity
+                  style={[styles.checkButton, checkingPincode && styles.checkButtonDisabled]}
+                  onPress={handleCheckPincode}
+                  disabled={checkingPincode}
+                >
+                  {checkingPincode ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Text style={styles.checkButtonText}>Check</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+              {pincodeAvailable !== null && (
+                <View style={[styles.availabilityResult, pincodeAvailable ? styles.availableResult : styles.unavailableResult]}>
+                  <Ionicons 
+                    name={pincodeAvailable ? 'checkmark-circle' : 'close-circle'} 
+                    size={18} 
+                    color={pincodeAvailable ? '#10b981' : '#ef4444'} 
+                  />
+                  <Text style={[styles.availabilityText, pincodeAvailable ? styles.availableText : styles.unavailableText]}>
+                    {pincodeAvailable ? 'Delivery available to this location' : 'Currently not serviceable'}
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            <View style={styles.dividerLine} />
+
+            {addresses.length === 0 ? (
+              <View style={styles.emptyAddressContainer}>
+                <Ionicons name="location-outline" size={48} color="#999" />
+                <Text style={styles.emptyAddressText}>No addresses added yet</Text>
+                <TouchableOpacity
+                  style={styles.addFirstAddressButton}
+                  onPress={() => {
+                    setAddressSheetVisible(false);
+                    addressSheetRef.current?.close();
+                    navigation.navigate('AddressBook' as never);
+                  }}
+                >
+                  <Text style={styles.addFirstAddressText}>Add Your First Address</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={styles.addressList}>
+                {addresses.map((address) => (
+                  <TouchableOpacity
+                    key={address.id}
+                    style={[
+                      styles.addressCard,
+                      selectedAddress?.id === address.id && styles.selectedAddressCard
+                    ]}
+                    onPress={() => handleAddressSelect(address)}
+                  >
+                    <View style={styles.addressCardHeader}>
+                      <View style={styles.addressCardNameRow}>
+                        <Text style={styles.addressCardName}>{address.full_name}</Text>
+                        {address.is_default && (
+                          <View style={styles.defaultBadge}>
+                            <Text style={styles.defaultBadgeText}>Default</Text>
+                          </View>
+                        )}
+                      </View>
+                      {selectedAddress?.id === address.id && (
+                        <Ionicons name="checkmark-circle" size={24} color="#F53F7A" />
+                      )}
+                    </View>
+                    <Text style={styles.addressCardPhone}>{address.phone}</Text>
+                    <Text style={styles.addressCardAddress}>
+                      {address.address_line1}
+                      {address.address_line2 && `, ${address.address_line2}`}
+                    </Text>
+                    <Text style={styles.addressCardCity}>
+                      {address.city}, {address.state} - {address.pincode}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+          </BottomSheetScrollView>
+        </BottomSheet>
       )}
     </View>
   );
@@ -1195,26 +1402,123 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f8f9fa',
   },
-  header: {
+  safeHeader: {
     backgroundColor: '#fff',
-    paddingTop: 0,
     shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 8,
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
     zIndex: 1000,
   },
-  statusBarSpacer: {
-    height: Platform.OS === 'ios' ? 16 : 8,
+  header: {
     backgroundColor: '#fff',
+    paddingHorizontal: 16,
+    paddingBottom: 12,
   },
-  headerContent: {
+  headerTopRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
+    marginBottom: 12,
+  },
+  logoContainer: {
+    gap: 4,
+  },
+  logo: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: '#1a1a1a',
+    letterSpacing: -0.5,
+  },
+  locationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  cityText: {
+    fontSize: 11,
+    color: '#6B7280',
+    fontWeight: '600',
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  languageContainer: {
+    position: 'relative',
+  },
+  langButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    backgroundColor: '#f8f8f8',
+    borderRadius: 8,
+  },
+  languageText: {
+    fontSize: 12,
+    color: '#2d334d',
+    fontWeight: '700',
+  },
+  langMenuDropdown: {
+    position: 'absolute',
+    top: 38,
+    right: 0,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 6,
+    minWidth: 120,
+    zIndex: 1001,
+    overflow: 'hidden',
+  },
+  langMenuItem: {
+    padding: 12,
+  },
+  langMenuItemActive: {
+    backgroundColor: '#f1f2f4',
+  },
+  langMenuText: {
+    color: '#222',
+    fontSize: 14,
+  },
+  coinBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#FFF5F7',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  coinText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#F53F7A',
+  },
+  profileButton: {
+    backgroundColor: 'lightgray',
+    borderRadius: 20,
+    padding: 7,
+    width: 34,
+    height: 34,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  searchBarIntegrated: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    gap: 10,
   },
   scrollContent: {
     flex: 1,
@@ -1222,34 +1526,7 @@ const styles = StyleSheet.create({
   },
   scrollContentContainer: {
     paddingBottom: 24,
-    paddingTop: 8,
-  },
-  logo: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: '#1a1a1a',
-    letterSpacing: -0.5,
-  },
-  cityText: {
-    fontSize: 12,
-    color: '#6B7280',
-    fontWeight: '600',
-    marginTop: 2,
-  },
-  headerRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  languageContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  languageText: {
-    fontSize: 14,
-    color: '#666',
-    fontWeight: '500',
+    paddingTop: 12,
   },
   currencyContainer: {
     flexDirection: 'row',
@@ -1605,13 +1882,11 @@ const styles = StyleSheet.create({
   },
   searchInput: {
     flex: 1,
-    fontSize: 15,
+    fontSize: 14,
     color: '#222',
-    paddingVertical: 4,
-    backgroundColor: 'transparent',
+    paddingVertical: 0,
   },
   micButton: {
-    marginLeft: 8,
     padding: 4,
   },
   searchBarOnlyHeader: {
@@ -1868,6 +2143,192 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#999',
     marginHorizontal: 4,
+  },
+  // Address Bottom Sheet Styles
+  addressSheetContent: {
+    flex: 1,
+    paddingHorizontal: 16,
+  },
+  addressSheetHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  addressSheetTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#333',
+  },
+  addNewAddressButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#FFF5F7',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  addNewAddressText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#F53F7A',
+  },
+  emptyAddressContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+  },
+  emptyAddressText: {
+    fontSize: 16,
+    color: '#999',
+    marginTop: 16,
+    marginBottom: 24,
+  },
+  addFirstAddressButton: {
+    backgroundColor: '#F53F7A',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 12,
+  },
+  addFirstAddressText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  addressList: {
+    gap: 12,
+    paddingBottom: 20,
+  },
+  addressCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 2,
+    borderColor: '#f0f0f0',
+  },
+  selectedAddressCard: {
+    borderColor: '#F53F7A',
+    backgroundColor: '#FFF5F7',
+  },
+  addressCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 8,
+  },
+  addressCardNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+  },
+  addressCardName: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#333',
+  },
+  defaultBadge: {
+    backgroundColor: '#4CAF50',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  defaultBadgeText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  addressCardPhone: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 4,
+  },
+  addressCardAddress: {
+    fontSize: 14,
+    color: '#333',
+    marginBottom: 4,
+  },
+  addressCardCity: {
+    fontSize: 14,
+    color: '#666',
+  },
+  // Pincode Checker Styles
+  pincodeChecker: {
+    marginBottom: 20,
+    padding: 16,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+  },
+  pincodeCheckerTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 12,
+  },
+  pincodeInputRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  pincodeInput: {
+    flex: 1,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 15,
+    color: '#333',
+  },
+  checkButton: {
+    backgroundColor: '#F53F7A',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    minWidth: 80,
+  },
+  checkButtonDisabled: {
+    backgroundColor: '#ccc',
+  },
+  checkButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  availabilityResult: {
+    marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    padding: 12,
+    borderRadius: 8,
+  },
+  availableResult: {
+    backgroundColor: '#ECFDF5',
+  },
+  unavailableResult: {
+    backgroundColor: '#FEF2F2',
+  },
+  availabilityText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  availableText: {
+    color: '#10b981',
+  },
+  unavailableText: {
+    color: '#ef4444',
+  },
+  dividerLine: {
+    height: 1,
+    backgroundColor: '#f0f0f0',
+    marginVertical: 16,
   },
 });
 

@@ -22,6 +22,7 @@ import ColorManagement from '~/screens/ColorManagement';
 import UserManagement from '~/screens/UserManagement';
 import Wishlist from '~/screens/Wishlist';
 import CollectionDetails from '~/screens/CollectionDetails';
+import SharedCollection from '~/screens/SharedCollection';
 import VendorProfile from '~/screens/VendorProfile';
 import JoinInfluencer from '~/screens/JoinInfluencer';
 import ResellerRegistration from '~/screens/ResellerRegistration';
@@ -51,6 +52,7 @@ const HomeStack = () => {
       <Stack.Screen name="HelpCenter" component={HelpCenter} />
       <Stack.Screen name="Wishlist" component={Wishlist} />
       <Stack.Screen name="CollectionDetails" component={CollectionDetails} />
+      <Stack.Screen name="SharedCollection" component={SharedCollection} />
       <Stack.Screen name="VendorProfile" component={VendorProfile} />
       <Stack.Screen name="JoinInfluencer" component={JoinInfluencer} />
       <Stack.Screen name="ResellerRegistration" component={ResellerRegistration} />

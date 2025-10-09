@@ -330,7 +330,7 @@ const Checkout = () => {
           [
             {
               text: 'Add Address',
-              onPress: () => (navigation as any).navigate('AddressBook')
+              onPress: () => (navigation as any).navigate('AddressBook', { selectMode: true })
             },
             {
               text: 'Cancel',
@@ -639,7 +639,7 @@ const Checkout = () => {
                 <Text style={styles.cardSubtitle}>Where should we deliver?</Text>
               </View>
             </View>
-            <TouchableOpacity onPress={() => (navigation as any).navigate('AddressBook')} style={styles.changeButton}>
+            <TouchableOpacity onPress={() => (navigation as any).navigate('AddressBook', { selectMode: true })} style={styles.changeButton}>
               <Text style={styles.changeButtonText}>
                 {defaultAddress ? 'Change' : 'Add'}
               </Text>
@@ -662,26 +662,18 @@ const Checkout = () => {
               {defaultAddress.phone && (
                 <Text style={styles.addressPhone}>Phone: {defaultAddress.phone}</Text>
               )}
-              <View style={{ flexDirection: 'row', marginTop: 12, gap: 8 }}>
-                <TouchableOpacity 
-                  onPress={() => (navigation as any).navigate('AddressBook')}
-                  style={{ paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderColor: '#e5e5e5', borderRadius: 8 }}
-                >
-                  <Text style={{ color: '#111' }}>Change</Text>
-                </TouchableOpacity>
-                <TouchableOpacity 
-                  onPress={() => (navigation as any).navigate('AddressBook')}
-                  style={{ paddingHorizontal: 12, paddingVertical: 8, backgroundColor: '#F53F7A', borderRadius: 8 }}
-                >
-                  <Text style={{ color: '#fff', fontWeight: '700' }}>Manage Addresses</Text>
-                </TouchableOpacity>
-              </View>
+              <TouchableOpacity 
+                onPress={() => (navigation as any).navigate('AddressBook', { selectMode: true })}
+                style={{ marginTop: 12, paddingHorizontal: 16, paddingVertical: 10, borderWidth: 1.5, borderColor: '#F53F7A', borderRadius: 8, alignItems: 'center' }}
+              >
+                <Text style={{ color: '#F53F7A', fontWeight: '700', fontSize: 14 }}>Change Address</Text>
+              </TouchableOpacity>
             </View>
           ) : (
             <View style={styles.emptyState}>
               <Ionicons name="location-outline" size={32} color="#ccc" />
               <Text style={styles.emptyText}>No delivery address added</Text>
-              <TouchableOpacity onPress={() => (navigation as any).navigate('AddressBook')} style={styles.addButton}>
+              <TouchableOpacity onPress={() => (navigation as any).navigate('AddressBook', { selectMode: true })} style={styles.addButton}>
                 <Text style={styles.addButtonText}>Add Address</Text>
               </TouchableOpacity>
             </View>
@@ -708,90 +700,6 @@ const Checkout = () => {
               <Text style={styles.emptyText}>No items in cart</Text>
             )}
           </View>
-        </View>
-
-        {/* Offers & Coupons */}
-        <View style={styles.card}>
-          <View style={styles.cardHeader}>
-            <View style={styles.cardHeaderLeft}>
-              <View style={styles.iconBadge}>
-                <Ionicons name="pricetag" size={18} color="#F53F7A" />
-              </View>
-              <View>
-                <Text style={styles.cardTitle}>Offers & Coupons</Text>
-                <Text style={styles.cardSubtitle}>Save more on this order</Text>
-              </View>
-            </View>
-          </View>
-
-          {couponAppliedCode ? (
-            <View style={styles.appliedBox}>
-              <View style={styles.appliedContent}>
-                <Ionicons name="checkmark-circle" size={20} color="#10b981" />
-                <View style={styles.appliedInfo}>
-                  <Text style={styles.appliedCode}>{couponAppliedCode}</Text>
-                  <Text style={styles.appliedSavings}>You saved ₹{couponDiscountAmount}</Text>
-                </View>
-              </View>
-              <TouchableOpacity onPress={removeCoupon} style={styles.removeBtn}>
-                <Text style={styles.removeBtnText}>Remove</Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <View style={styles.promoBox}>
-              <View style={styles.promoInput}>
-                <Ionicons name="pricetag-outline" size={16} color="#999" style={{ marginRight: 8 }} />
-                <TextInput
-                  style={styles.promoTextInput}
-                  placeholder="Enter coupon code"
-                  value={couponCode}
-                  onChangeText={setCouponCode}
-                  placeholderTextColor="#999"
-                  autoCapitalize="characters"
-                />
-                <TouchableOpacity onPress={tryApplyCoupon} style={styles.applyBtn}>
-                  <Text style={styles.applyBtnText}>Apply</Text>
-                </TouchableOpacity>
-              </View>
-              <Text style={styles.promoHint}>Available: SAVE10, NEW50</Text>
-            </View>
-          )}
-
-          {/* Gift Card Section */}
-          <View style={styles.divider} />
-          
-          {giftCardAppliedCode ? (
-            <View style={styles.appliedBox}>
-              <View style={styles.appliedContent}>
-                <Ionicons name="gift" size={20} color="#F53F7A" />
-                <View style={styles.appliedInfo}>
-                  <Text style={styles.appliedCode}>Gift Card: {giftCardAppliedCode}</Text>
-                  <Text style={styles.appliedSavings}>₹{giftCardAmountApplied} applied</Text>
-                </View>
-              </View>
-              <TouchableOpacity onPress={removeGiftCard} style={styles.removeBtn}>
-                <Text style={styles.removeBtnText}>Remove</Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <View style={styles.promoBox}>
-              <View style={styles.promoInput}>
-                <Ionicons name="gift-outline" size={16} color="#999" style={{ marginRight: 8 }} />
-                <TextInput
-                  style={styles.promoTextInput}
-                  placeholder="Enter gift card code"
-                  value={giftCardCode}
-                  onChangeText={setGiftCardCode}
-                  placeholderTextColor="#999"
-                  autoCapitalize="characters"
-                />
-                <TouchableOpacity onPress={tryApplyGiftCard} style={styles.applyBtn}>
-                  <Text style={styles.applyBtnText}>Apply</Text>
-                </TouchableOpacity>
-              </View>
-              <Text style={styles.promoHint}>Try: GIFT500, GIFT1000</Text>
-            </View>
-          )}
         </View>
 
         {/* Payment Method */}
@@ -855,27 +763,67 @@ const Checkout = () => {
               )}
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={[styles.paymentOption, paymentMethod === 'giftcard' && styles.paymentOptionActive]}
-              onPress={() => setPaymentMethod('giftcard')}
-              activeOpacity={0.7}
-            >
-              <View style={styles.paymentOptionLeft}>
-                <View style={[styles.radio, paymentMethod === 'giftcard' && styles.radioActive]}>
-                  {paymentMethod === 'giftcard' && <View style={styles.radioDot} />}
+            <View>
+              <TouchableOpacity
+                style={[styles.paymentOption, paymentMethod === 'giftcard' && styles.paymentOptionActive]}
+                onPress={() => setPaymentMethod('giftcard')}
+                activeOpacity={0.7}
+              >
+                <View style={styles.paymentOptionLeft}>
+                  <View style={[styles.radio, paymentMethod === 'giftcard' && styles.radioActive]}>
+                    {paymentMethod === 'giftcard' && <View style={styles.radioDot} />}
+                  </View>
+                  <Ionicons name="gift" size={20} color={paymentMethod === 'giftcard' ? '#F53F7A' : '#666'} />
+                  <View>
+                    <Text style={[styles.paymentText, paymentMethod === 'giftcard' && styles.paymentTextActive]}>
+                      Gift Card
+                    </Text>
+                    <Text style={styles.paymentSubtext}>Use gift card balance</Text>
+                  </View>
                 </View>
-                <Ionicons name="gift" size={20} color={paymentMethod === 'giftcard' ? '#F53F7A' : '#666'} />
-                <View>
-                  <Text style={[styles.paymentText, paymentMethod === 'giftcard' && styles.paymentTextActive]}>
-                    Gift Card
-                  </Text>
-                  <Text style={styles.paymentSubtext}>Use gift card balance</Text>
-                </View>
-              </View>
+                {paymentMethod === 'giftcard' && (
+                  <Ionicons name="checkmark-circle" size={20} color="#F53F7A" />
+                )}
+              </TouchableOpacity>
+
+              {/* Gift Card Input - Shows when gift card is selected */}
               {paymentMethod === 'giftcard' && (
-                <Ionicons name="checkmark-circle" size={20} color="#F53F7A" />
+                <View style={styles.giftCardInputContainer}>
+                  {giftCardAppliedCode ? (
+                    <View style={styles.appliedBox}>
+                      <View style={styles.appliedContent}>
+                        <Ionicons name="checkmark-circle" size={20} color="#10b981" />
+                        <View style={styles.appliedInfo}>
+                          <Text style={styles.appliedCode}>Gift Card: {giftCardAppliedCode}</Text>
+                          <Text style={styles.appliedSavings}>₹{giftCardAmountApplied} applied</Text>
+                        </View>
+                      </View>
+                      <TouchableOpacity onPress={removeGiftCard} style={styles.removeBtn}>
+                        <Text style={styles.removeBtnText}>Remove</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : (
+                    <View style={styles.promoBox}>
+                      <View style={styles.promoInput}>
+                        <Ionicons name="gift-outline" size={16} color="#999" style={{ marginRight: 8 }} />
+                        <TextInput
+                          style={styles.promoTextInput}
+                          placeholder="Enter gift card code"
+                          value={giftCardCode}
+                          onChangeText={setGiftCardCode}
+                          placeholderTextColor="#999"
+                          autoCapitalize="characters"
+                        />
+                        <TouchableOpacity onPress={tryApplyGiftCard} style={styles.applyBtn}>
+                          <Text style={styles.applyBtnText}>Apply</Text>
+                        </TouchableOpacity>
+                      </View>
+                      <Text style={styles.promoHint}>Try: GIFT500, GIFT1000</Text>
+                    </View>
+                  )}
+                </View>
               )}
-            </TouchableOpacity>
+            </View>
           </View>
 
           {paymentMethod === 'razorpay' && (
@@ -1394,6 +1342,10 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: '#e5e5e5',
     backgroundColor: '#fafafa',
+  },
+  giftCardInputContainer: {
+    marginTop: 12,
+    paddingHorizontal: 14,
   },
   paymentOptionActive: {
     borderColor: '#F53F7A',

@@ -1361,14 +1361,14 @@ const ProductDetailsBottomSheet: React.FC<ProductDetailsBottomSheetProps> = ({
       {/* Replacement Policy Modal */}
       {replacementPolicyVisible && (
         <View style={{ ...StyleSheet.absoluteFillObject, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.35)', zIndex: 99999 }}>
-          <View style={{ width: '88%', maxHeight: '80%', backgroundColor: '#fff', borderRadius: 16, padding: 16 }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <View style={{ width: '88%', maxHeight: '80%', backgroundColor: '#fff', borderRadius: 16, paddingTop: 16, paddingHorizontal: 16, paddingBottom: 16 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <Text style={{ fontSize: 18, fontWeight: '700', color: '#222' }}>Replacement Policy</Text>
               <TouchableOpacity onPress={() => setReplacementPolicyVisible(false)}>
                 <Ionicons name="close" size={22} color="#333" />
               </TouchableOpacity>
             </View>
-            <ScrollView showsVerticalScrollIndicator={true} style={{ marginTop: 4 }}>
+            <ScrollView showsVerticalScrollIndicator={true} style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 8 }}>
               <Text style={{ fontSize: 16, fontWeight: '700', color: '#111', marginBottom: 8 }}>✅ Conditions for Replacement:</Text>
               <Text style={{ color: '#333', marginBottom: 10 }}>1. Unboxing Video Required – Customers must record a clear video while opening the parcel, showing the product from start to finish.</Text>
               <Text style={{ color: '#333', marginBottom: 10 }}>2. Dress Condition – The item must be unused, in good condition, and with the original tag intact.</Text>

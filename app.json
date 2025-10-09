@@ -30,6 +30,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.only2u.only2u",
+      "associatedDomains": ["applinks:only2u.app", "applinks:*.only2u.app"],
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSPhotoLibraryUsageDescription": "This app needs access to your photo library to allow you to select and upload images for face swap and product customization features.",
@@ -51,6 +52,23 @@
         
         "android.permission.INTERNET",
         "android.permission.ACCESS_NETWORK_STATE"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "only2u.app",
+              "pathPrefix": "/shared-collection"
+            },
+            {
+              "scheme": "only2u"
+            }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
       ],
       "usesCleartextTraffic": true,
       "compileSdkVersion": 34,

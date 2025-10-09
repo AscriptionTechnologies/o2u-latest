@@ -34,16 +34,28 @@ const CollectionDetails = () => {
   const { removeFromWishlist } = useWishlist();
   const insets = useSafeAreaInsets();
 
-  const collection = (route.params as any)?.collection as Collection;
+  // Get collection info from route params (either old or new format)
+  const collectionId = (route.params as any)?.collectionId || (route.params as any)?.collection?.id;
+  const collectionName = (route.params as any)?.collectionName || (route.params as any)?.collection?.name;
+  
+  const [collection, setCollection] = useState<Collection | null>(null);
   const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchCollectionProducts();
-  }, [collection?.id]);
+    if (collectionId) {
+      // Set collection info
+      setCollection({
+        id: collectionId,
+        name: collectionName || 'Collection',
+        is_private: false,
+      });
+      fetchCollectionProducts();
+    }
+  }, [collectionId]);
 
   const fetchCollectionProducts = async () => {
-    if (!collection?.id || !userData?.id) return;
+    if (!collectionId || !userData?.id) return;
     
     setLoading(true);
     try {
@@ -51,7 +63,7 @@ const CollectionDetails = () => {
       const { data: collectionProducts, error: cpError } = await supabase
         .from('collection_products')
         .select('product_id')
-        .eq('collection_id', collection.id);
+        .eq('collection_id', collectionId);
 
       if (cpError) throw cpError;
 
@@ -63,18 +75,22 @@ const CollectionDetails = () => {
 
       const productIds = collectionProducts.map((cp: any) => cp.product_id);
 
-      // Fetch full product details - simplified query to avoid relationship issues
+      // Fetch full product details with variants for pricing and images
       const { data: productsData, error: productsError } = await supabase
         .from('products')
         .select(`
           id,
           name,
           description,
-          price,
           image_urls,
-          stock_quantity,
-          discount_percentage,
-          original_price
+          video_urls,
+          variants:product_variants(
+            price,
+            quantity,
+            discount_percentage,
+            image_urls,
+            video_urls
+          )
         `)
         .in('id', productIds);
 
@@ -82,27 +98,59 @@ const CollectionDetails = () => {
 
       if (productsData) {
         const formattedProducts = productsData.map((p: any) => {
-          // Use product's base price and original price for discount calculation
-          const price = p.price || 0;
-          const originalPrice = p.original_price || price;
+          // Get pricing from variants
+          const variants = p.variants || [];
+          
+          // Calculate min price and stock from variants
+          let minPrice = 0;
+          let totalStock = 0;
+          let maxDiscount = 0;
+          
+          if (variants.length > 0) {
+            const prices = variants.map((v: any) => v.price || 0).filter((p: number) => p > 0);
+            minPrice = prices.length > 0 ? Math.min(...prices) : 0;
+            totalStock = variants.reduce((sum: number, v: any) => sum + (v.quantity || 0), 0);
+            const discounts = variants.map((v: any) => v.discount_percentage || 0);
+            maxDiscount = Math.max(...discounts);
+          }
+          
+          // Calculate original price from discount
+          const originalPrice = maxDiscount > 0 ? minPrice / (1 - maxDiscount / 100) : minPrice;
+
+          // Ensure image_urls is an array
+          let imageUrls = p.image_urls;
+          if (!Array.isArray(imageUrls)) {
+            imageUrls = imageUrls ? [imageUrls] : [];
+          }
 
           return {
             id: p.id,
             name: p.name,
             description: p.description,
-            price: price,
-            originalPrice: originalPrice > price ? originalPrice : undefined,
-            discount: p.discount_percentage,
-            image_urls: p.image_urls,
-            stock: p.stock_quantity || 0,
+            price: minPrice,
+            originalPrice: originalPrice > minPrice ? originalPrice : undefined,
+            discount: maxDiscount,
+            image_urls: imageUrls,
+            video_urls: p.video_urls || [],
+            variants: variants,  // Include variants so getFirstSafeProductImage can access variant images
+            stock: totalStock,
           };
         });
 
+        console.log('Formatted products:', formattedProducts.length, 'products loaded');
+        if (formattedProducts.length > 0) {
+          console.log('Sample product:', JSON.stringify(formattedProducts[0], null, 2));
+          console.log('Sample product image_urls:', formattedProducts[0].image_urls);
+          console.log('Sample product variants:', formattedProducts[0].variants?.length);
+          if (formattedProducts[0].variants?.[0]) {
+            console.log('Sample variant image_urls:', formattedProducts[0].variants[0].image_urls);
+          }
+        }
         setProducts(formattedProducts);
       }
     } catch (error) {
       console.error('Error fetching collection products:', error);
-      Alert.alert('Error', 'Failed to load collection products');
+      Alert.alert('Error', 'Failed to load collection products. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -123,7 +171,7 @@ const CollectionDetails = () => {
                 .from('collection_products')
                 .delete()
                 .match({
-                  collection_id: collection.id,
+                  collection_id: collectionId,
                   product_id: productId,
                 });
 
@@ -141,53 +189,97 @@ const CollectionDetails = () => {
     );
   };
 
-  const renderProductItem = ({ item }: any) => (
-    <TouchableOpacity
-      style={styles.productCard}
-      onPress={() => {
-        const productForDetails = {
-          id: item.id,
-          name: item.name,
-          price: item.price,
-          originalPrice: item.originalPrice,
-          rating: 4.5,
-          reviews: 0,
-          image: getFirstSafeProductImage(item),
-          image_urls: getProductImages(item),
-          description: item.description,
-          stock: item.stock || '0',
-          images: item.image_urls?.length || 1,
-        };
-        (navigation as any).navigate('ProductDetails', { product: productForDetails });
-      }}
-    >
-      <View style={styles.imageContainer}>
-        <Image source={{ uri: getFirstSafeProductImage(item) }} style={styles.productImage} />
-        <TouchableOpacity
-          style={styles.removeButton}
-          onPress={() => handleRemoveFromCollection(item.id)}
-        >
-          <Ionicons name="close-circle" size={24} color="#F53F7A" />
-        </TouchableOpacity>
-        {item.discount && item.discount > 0 && (
-          <View style={styles.discountBadge}>
-            <Text style={styles.discountText}>{item.discount}% OFF</Text>
-          </View>
-        )}
-      </View>
-      <View style={styles.productInfo}>
-        <Text style={styles.productName} numberOfLines={2}>
-          {item.name}
-        </Text>
-        <View style={styles.priceContainer}>
-          <Text style={styles.price}>₹{item.price.toLocaleString()}</Text>
-          {item.originalPrice && item.originalPrice > item.price && (
-            <Text style={styles.originalPrice}>₹{item.originalPrice.toLocaleString()}</Text>
+  const renderProductItem = ({ item }: any) => {
+    const discountPercent = item.discount ? Math.round(item.discount) : 0;
+    const productImage = getFirstSafeProductImage(item);
+    const hasValidPrice = item.price && item.price > 0;
+    
+    // Debug logging
+    console.log('Rendering product:', item.name);
+    console.log('Product has variants:', item.variants?.length);
+    console.log('Product image_urls:', item.image_urls);
+    console.log('Resolved productImage:', productImage);
+    
+    return (
+      <TouchableOpacity
+        style={styles.productCard}
+        onPress={() => {
+          const productForDetails = {
+            id: item.id,
+            name: item.name,
+            price: item.price || 0,
+            originalPrice: item.originalPrice,
+            discount: discountPercent,
+            rating: 4.5,
+            reviews: 0,
+            image: productImage,
+            image_urls: getProductImages(item),
+            description: item.description || '',
+            stock: item.stock?.toString() || '0',
+            images: item.image_urls?.length || 1,
+          };
+          (navigation as any).navigate('ProductDetails', { product: productForDetails });
+        }}
+      >
+        <View style={styles.imageContainer}>
+          {productImage ? (
+            <Image 
+              source={{ uri: productImage }} 
+              style={styles.productImage}
+            />
+          ) : (
+            <View style={[styles.productImage, styles.imagePlaceholder]}>
+              <Ionicons name="image-outline" size={48} color="#ccc" />
+            </View>
+          )}
+          <TouchableOpacity
+            style={styles.removeButton}
+            onPress={(e) => {
+              e.stopPropagation();
+              handleRemoveFromCollection(item.id);
+            }}
+          >
+            <Ionicons name="close-circle" size={24} color="#F53F7A" />
+          </TouchableOpacity>
+          {discountPercent > 0 && (
+            <View style={styles.discountBadge}>
+              <Text style={styles.discountText}>{discountPercent}% OFF</Text>
+            </View>
           )}
         </View>
-      </View>
-    </TouchableOpacity>
-  );
+        <View style={styles.productInfo}>
+          <Text style={styles.productName} numberOfLines={2}>
+            {item.name || 'Product Name'}
+          </Text>
+          <View style={styles.priceContainer}>
+            {hasValidPrice ? (
+              <>
+                <Text style={styles.price}>₹{item.price.toLocaleString()}</Text>
+                {item.originalPrice && item.originalPrice > item.price && (
+                  <Text style={styles.originalPrice}>
+                    ₹{Math.round(item.originalPrice).toLocaleString()}
+                  </Text>
+                )}
+              </>
+            ) : (
+              <Text style={styles.priceUnavailable}>Price not available</Text>
+            )}
+          </View>
+          {item.stock > 0 ? (
+            <View style={styles.stockBadge}>
+              <Ionicons name="checkmark-circle" size={12} color="#4CAF50" />
+              <Text style={styles.stockText}>{item.stock} in stock</Text>
+            </View>
+          ) : hasValidPrice && (
+            <View style={[styles.stockBadge, { opacity: 0.6 }]}>
+              <Ionicons name="close-circle" size={12} color="#FF3B30" />
+              <Text style={[styles.stockText, { color: '#FF3B30' }]}>Out of stock</Text>
+            </View>
+          )}
+        </View>
+      </TouchableOpacity>
+    );
+  };
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -385,6 +477,27 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 11,
     fontWeight: '700',
+  },
+  stockBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 6,
+  },
+  stockText: {
+    fontSize: 11,
+    color: '#4CAF50',
+    fontWeight: '600',
+  },
+  imagePlaceholder: {
+    backgroundColor: '#f5f5f5',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  priceUnavailable: {
+    fontSize: 13,
+    color: '#999',
+    fontStyle: 'italic',
   },
 });
 

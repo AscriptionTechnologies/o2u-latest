@@ -9,13 +9,21 @@
       "distribution": "internal",
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "ANDROID_HOME": "/Users/nischal/Library/Android/sdk",
+        "ANDROID_SDK_ROOT": "/Users/nischal/Library/Android/sdk"
       }
     },
     "preview": {
       "android": {
         "buildType": "apk"
       },
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "ANDROID_HOME": "/Users/nischal/Library/Android/sdk",
+        "ANDROID_SDK_ROOT": "/Users/nischal/Library/Android/sdk"
+      }
     },
     "production": {
       "android": {
