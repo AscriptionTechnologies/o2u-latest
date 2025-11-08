@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  # Expo Development Server
+  expo-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: o2u-expo-dev
+    ports:
+      - "8081:8081"   # Metro bundler
+      - "19006:19006" # Web server
+    volumes:
+      # Mount source code for hot reload
+      - ./:/app
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+      - EXPO_DEVTOOLS_LISTEN_ADDRESS=0.0.0.0
+    stdin_open: true
+    tty: true
+    networks:
+      - o2u-network
+
+  # Optional: Supabase Local Development (if you want to run backend locally)
+  # Uncomment if you want to use local Supabase instead of cloud
+  # supabase-db:
+  #   image: supabase/postgres:15.1.0.117
+  #   container_name: o2u-supabase-db
+  #   ports:
+  #     - "54322:5432"
+  #   environment:
+  #     POSTGRES_PASSWORD: your-super-secret-and-long-postgres-password
+  #     POSTGRES_DB: postgres
+  #   volumes:
+  #     - supabase-db-data:/var/lib/postgresql/data
+  #   networks:
+  #     - o2u-network
+
+  # supabase-studio:
+  #   image: supabase/studio:20240729-15e7849
+  #   container_name: o2u-supabase-studio
+  #   ports:
+  #     - "54323:3000"
+  #   environment:
+  #     SUPABASE_URL: http://supabase-kong:8000
+  #     STUDIO_PG_META_URL: http://supabase-meta:8080
+  #   depends_on:
+  #     - supabase-db
+  #   networks:
+  #     - o2u-network
+
+networks:
+  o2u-network:
+    driver: bridge
+
+volumes:
+  supabase-db-data:
