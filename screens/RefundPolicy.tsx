@@ -66,7 +66,7 @@ const RefundPolicy = () => {
           <Text style={styles.bulletPoint}>• Products that have been used, damaged, or altered</Text>
           <Text style={styles.bulletPoint}>• Gift cards</Text>
           <Text style={styles.bulletPoint}>• AI-generated content or face swap services</Text>
-          <Text style={styles.bulletPoint}>• Virtual try-on experiences</Text>
+          <Text style={styles.bulletPoint}>• Face swap preview experiences</Text>
         </View>
 
         <View style={styles.section}>
@@ -113,7 +113,7 @@ const RefundPolicy = () => {
           <Text style={styles.bulletPoint}>• No refunds for AI-generated content or face swap results</Text>
           <Text style={styles.bulletPoint}>• Technical issues with AI features will be addressed promptly</Text>
           <Text style={styles.bulletPoint}>• We are not responsible for misuse of AI-generated content</Text>
-          <Text style={styles.bulletPoint}>• Virtual try-on experiences are for visualization purposes only</Text>
+          <Text style={styles.bulletPoint}>• Face swap previews are for visualization purposes only</Text>
         </View>
 
         <View style={styles.section}>

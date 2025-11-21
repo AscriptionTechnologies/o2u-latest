@@ -10,6 +10,10 @@
       "android": {
         "buildType": "apk"
       },
+      "ios": {
+        "simulator": false,
+        "buildConfiguration": "Debug"
+      },
       "env": {
         "ANDROID_HOME": "/Users/nischal/Library/Android/sdk",
         "ANDROID_SDK_ROOT": "/Users/nischal/Library/Android/sdk"
@@ -18,6 +22,10 @@
     "preview": {
       "android": {
         "buildType": "apk"
+      },
+      "ios": {
+        "simulator": false,
+        "buildConfiguration": "Release"
       },
       "distribution": "internal",
       "env": {
@@ -28,6 +36,10 @@
     "production": {
       "android": {
         "buildType": "app-bundle"
+      },
+      "ios": {
+        "simulator": false,
+        "buildConfiguration": "Release"
       },
       "autoIncrement": true
     }

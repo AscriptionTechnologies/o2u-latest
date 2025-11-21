@@ -1,8 +1,8 @@
-import { View, Text, Platform, Modal, TouchableOpacity, TextInput, KeyboardAvoidingView, Keyboard, ScrollView } from 'react-native';
+import { View, Text, Platform, Modal, TouchableOpacity, TextInput, KeyboardAvoidingView, Keyboard, ScrollView, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { createStackNavigator } from '@react-navigation/stack';
-import React, { useEffect, useRef, useState } from 'react';
+import { createStackNavigator, CardStyleInterpolators, TransitionSpecs } from '@react-navigation/stack';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useNavigation as useRootNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Profile from '~/screens/Profile';
@@ -20,44 +20,96 @@ import CategoryManagement from '~/screens/CategoryManagement';
 import ProductManagement from '~/screens/ProductManagement';
 import ColorManagement from '~/screens/ColorManagement';
 import UserManagement from '~/screens/UserManagement';
+import SettingsManagement from '~/screens/SettingsManagement';
+import OrderManagement from '~/screens/OrderManagement';
 import Wishlist from '~/screens/Wishlist';
 import CollectionDetails from '~/screens/CollectionDetails';
 import SharedCollection from '~/screens/SharedCollection';
 import VendorProfile from '~/screens/VendorProfile';
 import JoinInfluencer from '~/screens/JoinInfluencer';
 import ResellerRegistration from '~/screens/ResellerRegistration';
-import ResellerDashboardSimple from '~/screens/ResellerDashboardSimple';
+import ResellerDashboard from '~/screens/ResellerDashboard';
 import CatalogShare from '~/screens/CatalogShare';
+import AllReviews from '~/screens/AllReviews';
 import { useUser } from '~/contexts/UserContext';
 import { useCart } from '~/contexts/CartContext';
-import { useTranslation } from 'react-i18next';
 import { useAuth } from '~/contexts/useAuth';
 import { useLoginSheet } from '~/contexts/LoginSheetContext';
 import { supabase } from '~/utils/supabase';
+import ChatThread from '~/screens/ChatThread';
+import FriendSearch from '~/screens/FriendSearch';
+import Coupons from '~/screens/Coupons';
+import Toast from 'react-native-toast-message';
+import { ensureNewUserReferralCoupon, ensureReferrerRewardCoupon } from '~/services/referralCouponService';
 
 const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
 
+// Custom smooth easing configuration
+const customTransitionSpec = {
+  open: {
+    animation: 'spring',
+    config: {
+      stiffness: 1000,
+      damping: 500,
+      mass: 3,
+      overshootClamping: true,
+      restDisplacementThreshold: 0.01,
+      restSpeedThreshold: 0.01,
+    },
+  },
+  close: {
+    animation: 'spring',
+    config: {
+      stiffness: 1000,
+      damping: 500,
+      mass: 3,
+      overshootClamping: true,
+      restDisplacementThreshold: 0.01,
+      restSpeedThreshold: 0.01,
+    },
+  },
+};
+
 // Home Stack Navigator (Dashboard + ProductDetails + Products + Profile + Profile-related screens)
 const HomeStack = () => {
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
+    <Stack.Navigator 
+      screenOptions={{ 
+        headerShown: false,
+        gestureEnabled: true,
+        gestureDirection: 'horizontal',
+        cardStyleInterpolator: CardStyleInterpolators.forHorizontalIOS,
+        transitionSpec: customTransitionSpec,
+      }}
+    >
       <Stack.Screen name="Home" component={Dashboard} />
       <Stack.Screen name="ProductDetails" component={ProductDetails} />
       <Stack.Screen name="Products" component={Products} />
       <Stack.Screen name="Profile" component={Profile} />
       <Stack.Screen name="EditProfile" component={EditProfile} />
       <Stack.Screen name="MyOrders" component={MyOrders} />
+      <Stack.Screen name="ChatThread" component={ChatThread} />
+      <Stack.Screen name="FriendSearch" component={FriendSearch} />
       <Stack.Screen name="BodyMeasurements" component={BodyMeasurements} />
       <Stack.Screen name="HelpCenter" component={HelpCenter} />
       <Stack.Screen name="Wishlist" component={Wishlist} />
       <Stack.Screen name="CollectionDetails" component={CollectionDetails} />
       <Stack.Screen name="SharedCollection" component={SharedCollection} />
+      <Stack.Screen name="AllReviews" component={AllReviews} />
       <Stack.Screen name="VendorProfile" component={VendorProfile} />
       <Stack.Screen name="JoinInfluencer" component={JoinInfluencer} />
       <Stack.Screen name="ResellerRegistration" component={ResellerRegistration} />
-      <Stack.Screen name="ResellerDashboard" component={ResellerDashboardSimple} />
+      <Stack.Screen name="ResellerDashboard" component={ResellerDashboard} />
       <Stack.Screen name="CatalogShare" component={CatalogShare} />
+      <Stack.Screen name="Coupons" component={Coupons} />
+      <Stack.Screen name="Admin" component={Admin} />
+      <Stack.Screen name="UserManagement" component={UserManagement} />
+      <Stack.Screen name="CategoryManagement" component={CategoryManagement} />
+      <Stack.Screen name="ProductManagement" component={ProductManagement} />
+      <Stack.Screen name="ColorManagement" component={ColorManagement} />
+      <Stack.Screen name="SettingsManagement" component={SettingsManagement} />
+      <Stack.Screen name="OrderManagement" component={OrderManagement} />
     </Stack.Navigator>
   );
 };
@@ -65,7 +117,15 @@ const HomeStack = () => {
 // Admin Stack Navigator (Admin + UserManagement + CategoryManagement + ProductManagement + ColorManagement)
 const AdminStack = () => {
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
+    <Stack.Navigator 
+      screenOptions={{ 
+        headerShown: false,
+        gestureEnabled: true,
+        gestureDirection: 'horizontal',
+        cardStyleInterpolator: CardStyleInterpolators.forHorizontalIOS,
+        transitionSpec: customTransitionSpec,
+      }}
+    >
       <Stack.Screen name="AdminMain" component={Admin} />
       <Stack.Screen name="UserManagement" component={UserManagement} />
       <Stack.Screen name="CategoryManagement" component={CategoryManagement} />
@@ -82,19 +142,13 @@ export default function TabLayout() {
   const isAdmin = userData?.role === 'admin';
   const { getCartCount } = useCart();
   const cartCount = getCartCount();
-  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   
-  // Safe translate helper: prettifies missing keys and underscores
-  const tt = (key: string, fallback: string) => {
-    try {
-      const val = t(key) as unknown as string;
-      if (!val || typeof val !== 'string') return fallback;
-      if (val === key || val.includes('_')) return fallback;
-      return val;
-    } catch {
-      return fallback;
-    }
+  // Safe translate helper - returns plain strings without i18n
+  const tt = (key: string, fallback: string): string => {
+    // Just return the fallback directly to avoid any translation issues
+    const result = fallback || key || 'Label';
+    return String(result); // Ensure it's always a string
   };
 
   // Recurring login prompt for guests
@@ -113,6 +167,11 @@ export default function TabLayout() {
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [name, setName] = useState('');
   const [creatingProfile, setCreatingProfile] = useState(false);
+  // Referral code state
+  const [referralCodeInput, setReferralCodeInput] = useState('');
+  const [referralCodeState, setReferralCodeState] = useState<'idle' | 'checking' | 'valid' | 'invalid'>('idle');
+  const [referralCodeMessage, setReferralCodeMessage] = useState('');
+  const [appliedReferralCoupon, setAppliedReferralCoupon] = useState<{ code: string; couponId: string; referrerId?: string | null } | null>(null);
   // Track Supabase auth session directly to avoid profile-loading delays
   useEffect(() => {
     let isMounted = true;
@@ -174,6 +233,10 @@ export default function TabLayout() {
     setVerifying(false);
     setOtpSent(false);
     setResendIn(0);
+    setReferralCodeInput('');
+    setReferralCodeState('idle');
+    setReferralCodeMessage('');
+    setAppliedReferralCoupon(null);
   };
 
   const handleSendOtp = async () => {
@@ -200,6 +263,55 @@ export default function TabLayout() {
       setSending(false);
     }
   };
+
+  const handleApplyReferralCodeInput = useCallback(async () => {
+    const trimmed = referralCodeInput.trim().toUpperCase();
+    if (!trimmed) {
+      setReferralCodeState('invalid');
+      setReferralCodeMessage('Enter a referral code to apply.');
+      setAppliedReferralCoupon(null);
+      return;
+    }
+
+    setReferralCodeState('checking');
+    setReferralCodeMessage('');
+
+    try {
+      const { data, error } = await supabase
+        .from('coupons')
+        .select('id, code, is_active, discount_type, discount_value, created_by')
+        .eq('code', trimmed)
+        .eq('is_active', true)
+        .maybeSingle();
+
+      if (error || !data) {
+        setReferralCodeState('invalid');
+        setReferralCodeMessage('Invalid or inactive referral code.');
+        setAppliedReferralCoupon(null);
+        return;
+      }
+
+      if (data.discount_type !== 'fixed' || Number(data.discount_value) < 100) {
+        setReferralCodeState('invalid');
+        setReferralCodeMessage('This code is not eligible for referral discount.');
+        setAppliedReferralCoupon(null);
+        return;
+      }
+
+      setReferralCodeState('valid');
+      setReferralCodeMessage('Referral code applied! You will see ₹100 off on your first order.');
+      setAppliedReferralCoupon({ 
+        code: trimmed, 
+        couponId: data.id,
+        referrerId: data.created_by || null 
+      });
+    } catch (error) {
+      console.error('Referral code apply error:', error);
+      setReferralCodeState('invalid');
+      setReferralCodeMessage('Unable to verify referral code. Please try again.');
+      setAppliedReferralCoupon(null);
+    }
+  }, [referralCodeInput]);
 
   const handleVerifyOtp = async () => {
     try {
@@ -286,8 +398,34 @@ export default function TabLayout() {
         setCreatingProfile(false);
         return;
       }
+      if (appliedReferralCoupon) {
+        try {
+          const newUserCoupon = await ensureNewUserReferralCoupon(authUser.id);
+
+          Toast.show({
+            type: 'success',
+            text1: 'Referral saved',
+            text2: '₹100 off coupon added to your account.',
+          });
+
+          if (appliedReferralCoupon.referrerId) {
+            await ensureReferrerRewardCoupon(appliedReferralCoupon.referrerId);
+          }
+
+          console.log('[Signup] ✅ Referral coupons synced to Supabase:', {
+            newUserCoupon: newUserCoupon.code,
+            referrerId: appliedReferralCoupon.referrerId,
+          });
+        } catch (couponError) {
+          console.error('[Signup] ❌ Error syncing referral coupons:', couponError);
+        }
+      }
       setShowOnboarding(false);
       setName('');
+      setReferralCodeInput('');
+      setReferralCodeState('idle');
+      setReferralCodeMessage('');
+      setAppliedReferralCoupon(null);
     } catch (e: any) {
       setError(e?.message || 'Failed to create profile');
     } finally {
@@ -388,7 +526,9 @@ export default function TabLayout() {
               marginTop: -5,
             },
             tabBarLabel: ({ focused }) => (
-              <Text style={{ color: '#000', fontSize: 12, fontWeight: '600', marginTop: 4 }}>{tt('admin', 'Admin')}</Text>
+              <Text style={{ color: '#000', fontSize: 12, fontWeight: '600', marginTop: 4 }}>
+                {tt('admin', 'Admin') || 'Admin'}
+              </Text>
             ),
           }}
         />
@@ -405,7 +545,9 @@ export default function TabLayout() {
             </View>
           ),
           tabBarLabel: ({ focused }) => (
-            <Text style={{ color: focused ? '#FF3F6C' : '#8E8E93', fontSize: 12, fontWeight: '600', marginTop: 4 }}>{tt('trending', 'Trending')}</Text>
+            <Text style={{ color: focused ? '#FF3F6C' : '#8E8E93', fontSize: 12, fontWeight: '600', marginTop: 4 }}>
+              {tt('trending', 'Trending') || 'Trending'}
+            </Text>
           ),
         }}
       />
@@ -502,6 +644,75 @@ export default function TabLayout() {
                   returnKeyType='done'
                   maxLength={15}
                 />
+              </View>
+
+              {/* Referral code input */}
+              <View style={{ marginTop: 16 }}>
+                <Text style={{ fontSize: 12, color: '#666', marginBottom: 6, fontWeight: '700', letterSpacing: 0.2 }}>
+                  Have a referral code? (optional)
+                </Text>
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    backgroundColor: '#F4F5F7',
+                    borderRadius: 14,
+                    paddingHorizontal: 12,
+                    borderWidth: 1,
+                    borderColor:
+                      referralCodeState === 'valid'
+                        ? '#A7F3D0'
+                        : referralCodeState === 'invalid'
+                        ? '#FECACA'
+                        : '#EAECF0',
+                  }}
+                >
+                  <TextInput
+                    value={referralCodeInput}
+                    onChangeText={(text) => {
+                      setReferralCodeInput(text.toUpperCase());
+                      if (referralCodeState !== 'idle') {
+                        setReferralCodeState('idle');
+                        setReferralCodeMessage('');
+                        setAppliedReferralCoupon(null);
+                      }
+                    }}
+                    placeholder="ENTER CODE"
+                    placeholderTextColor="#9CA3AF"
+                    style={{ flex: 1, fontSize: 14, color: '#111', paddingVertical: Platform.OS === 'android' ? 10 : 14 }}
+                    autoCapitalize="characters"
+                  />
+                  <TouchableOpacity
+                    style={{
+                      paddingHorizontal: 14,
+                      paddingVertical: 8,
+                      backgroundColor: referralCodeState === 'valid' ? '#10B981' : '#F53F7A',
+                      borderRadius: 12,
+                      marginLeft: 8,
+                    }}
+                    onPress={handleApplyReferralCodeInput}
+                    disabled={referralCodeState === 'checking'}
+                  >
+                    {referralCodeState === 'checking' ? (
+                      <ActivityIndicator color="#fff" size="small" />
+                    ) : (
+                      <Text style={{ color: '#fff', fontWeight: '700' }}>
+                        {referralCodeState === 'valid' ? 'Applied' : 'Apply'}
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+                {!!referralCodeMessage && (
+                  <Text
+                    style={{
+                      marginTop: 6,
+                      fontSize: 12,
+                      color: referralCodeState === 'valid' ? '#047857' : '#B91C1C',
+                    }}
+                  >
+                    {referralCodeMessage}
+                  </Text>
+                )}
               </View>
 
               {/* Primary CTA send/resend */}

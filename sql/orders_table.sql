@@ -95,23 +95,31 @@ CREATE POLICY "Admins can view all order items" ON order_items
     )
   );
 
+-- Create sequence for incremental order numbers
+DROP SEQUENCE IF EXISTS order_number_seq;
+CREATE SEQUENCE order_number_seq START 1;
+
 -- Function to generate order number
 CREATE OR REPLACE FUNCTION generate_order_number()
 RETURNS TRIGGER AS $$
+DECLARE
+  new_order_num TEXT;
 BEGIN
-  NEW.order_number := 'ORD-' || EXTRACT(YEAR FROM NOW()) || '-' || 
-                     LPAD(EXTRACT(MONTH FROM NOW())::TEXT, 2, '0') || '-' ||
-                     LPAD(EXTRACT(DAY FROM NOW())::TEXT, 2, '0') || '-' ||
-                     LPAD((SELECT COALESCE(MAX(CAST(SUBSTRING(order_number FROM 16) AS INTEGER)), 0) + 1 
-                           FROM orders 
-                           WHERE order_number LIKE 'ORD-' || EXTRACT(YEAR FROM NOW()) || '-' || 
-                                 LPAD(EXTRACT(MONTH FROM NOW())::TEXT, 2, '0') || '-' ||
-                                 LPAD(EXTRACT(DAY FROM NOW())::TEXT, 2, '0') || '-%')::TEXT, 4, '0');
+  -- Only generate if order_number is NULL or empty
+  IF NEW.order_number IS NULL OR NEW.order_number = '' THEN
+    -- Generate order number: ORD-YYYYMMDD-001, ORD-YYYYMMDD-002, etc.
+    new_order_num := 'ORD-' || TO_CHAR(NOW(), 'YYYYMMDD') || '-' || 
+                     LPAD(nextval('order_number_seq')::TEXT, 3, '0');
+    
+    NEW.order_number := new_order_num;
+  END IF;
+  
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
 -- Trigger to automatically generate order number
+DROP TRIGGER IF EXISTS generate_order_number_trigger ON orders;
 CREATE TRIGGER generate_order_number_trigger
   BEFORE INSERT ON orders
   FOR EACH ROW

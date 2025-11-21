@@ -1,9 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, ScrollView, Alert, Modal, KeyboardAvoidingView, Platform } from 'react-native';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, ScrollView, Alert, Modal, KeyboardAvoidingView, Platform, FlatList } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
+import { useCallback } from 'react';
 import { supabase } from '~/utils/supabase';
+import { getGooglePlacesApiKey } from '~/utils/settings';
 import { useUser } from '~/contexts/UserContext';
 import Toast from 'react-native-toast-message';
 
@@ -36,7 +38,7 @@ const AddressBook = () => {
   // Form state
   const [formVisible, setFormVisible] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [label, setLabel] = useState('Home');
+  // Label removed
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
   const [line1, setLine1] = useState('');
@@ -47,6 +49,9 @@ const AddressBook = () => {
   const [postalCode, setPostalCode] = useState('');
   const [country, setCountry] = useState('India');
   const [isDefault, setIsDefault] = useState(false);
+  const [placeQuery, setPlaceQuery] = useState('');
+  const [placeResults, setPlaceResults] = useState<Array<{ description: string; city?: string; state?: string; country?: string }>>([]);
+  const placeDebounceRef = useRef<NodeJS.Timeout | null>(null);
 
   const fetchAddresses = async () => {
     if (!userData?.id) return;
@@ -55,6 +60,7 @@ const AddressBook = () => {
       .from('user_addresses')
       .select('*')
       .eq('user_id', userData.id)
+      .order('is_default', { ascending: false })
       .order('created_at', { ascending: false });
     setLoading(false);
     if (error) {
@@ -68,9 +74,16 @@ const AddressBook = () => {
     fetchAddresses();
   }, [userData?.id]);
 
+  // Refresh when screen gains focus (e.g., after returning from AddAddress)
+  useFocusEffect(
+    useCallback(() => {
+      fetchAddresses();
+    }, [userData?.id])
+  );
+
   const resetForm = () => {
     setEditingId(null);
-    setLabel('Home');
+    // label removed
     setFullName('');
     setPhone('');
     setLine1('');
@@ -84,13 +97,12 @@ const AddressBook = () => {
   };
 
   const openCreate = () => {
-    resetForm();
-    setFormVisible(true);
+    (navigation as any).navigate('AddAddress');
   };
 
   const openEdit = (addr: UserAddress) => {
     setEditingId(addr.id);
-    setLabel(addr.label || 'Home');
+    // label removed
     setFullName(addr.full_name || '');
     setPhone(addr.phone || '');
     setLine1(addr.street_line1 || '');
@@ -107,6 +119,11 @@ const AddressBook = () => {
   const validate = () => {
     if (!fullName.trim()) return 'Name required';
     if (!phone.trim()) return 'Phone required';
+    const phoneRegex = /^[6-9]\d{9}$/;
+    const cleanPhone = phone.replace(/\D/g, '');
+    if (cleanPhone.length !== 10 || !phoneRegex.test(cleanPhone)) {
+      return 'Please enter a valid 10-digit phone number';
+    }
     if (!line1.trim()) return 'Street address required';
     if (!city.trim()) return 'City required';
     if (!stateName.trim()) return 'State required';
@@ -123,7 +140,7 @@ const AddressBook = () => {
     }
     const payload = {
       user_id: userData.id,
-      label,
+      // label removed,
       full_name: fullName,
       phone,
       street_line1: line1,
@@ -136,6 +153,10 @@ const AddressBook = () => {
       is_default: isDefault,
     };
     let error;
+    // Ensure only one default: if setting default, unset others first
+    if (isDefault) {
+      await supabase.from('user_addresses').update({ is_default: false }).eq('user_id', userData.id);
+    }
     if (editingId) {
       const res = await supabase.from('user_addresses').update(payload).eq('id', editingId);
       error = res.error as any;
@@ -152,6 +173,42 @@ const AddressBook = () => {
     resetForm();
     fetchAddresses();
   };
+
+  // Simple location suggestion source (can be replaced with Google Places API)
+  const queryPlaces = async (q: string) => {
+    if (!q || q.length < 2) {
+      setPlaceResults([]);
+      return;
+    }
+    try {
+      const apiKey = await getGooglePlacesApiKey();
+      if (!apiKey) {
+        setPlaceResults([]);
+        return;
+      }
+      const url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(q)}&types=(cities)&components=country:in&key=${apiKey}`;
+      const resp = await fetch(url);
+      const json = await resp.json();
+      if (json.status !== 'OK' || !Array.isArray(json.predictions)) {
+        setPlaceResults([]);
+        return;
+      }
+
+      const results = json.predictions.map((p: any) => ({ description: p.description }));
+      setPlaceResults(results.slice(0, 8));
+    } catch (e) {
+      setPlaceResults([]);
+    }
+  };
+
+  // Debounced query when user types in city/state/country fields
+  useEffect(() => {
+    if (placeDebounceRef.current) clearTimeout(placeDebounceRef.current);
+    placeDebounceRef.current = setTimeout(() => queryPlaces(placeQuery), 250);
+    return () => {
+      if (placeDebounceRef.current) clearTimeout(placeDebounceRef.current);
+    };
+  }, [placeQuery]);
 
   const deleteAddress = async (id: string) => {
     Alert.alert('Delete Address', 'Are you sure you want to delete this address?', [
@@ -215,7 +272,6 @@ const AddressBook = () => {
           >
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.labelText}>{addr.label || 'Address'}</Text>
                 <Text style={styles.nameText}>{addr.full_name} • {addr.phone}</Text>
               </View>
               {selectionMode ? (
@@ -263,17 +319,16 @@ const AddressBook = () => {
         )}
       </ScrollView>
 
-      <Modal visible={formVisible} transparent animationType="slide" onRequestClose={() => setFormVisible(false)}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalCard}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>{editingId ? 'Edit Address' : 'New Address'}</Text>
-                <TouchableOpacity onPress={() => setFormVisible(false)}>
-                  <Ionicons name="close" size={24} color="#666" />
-                </TouchableOpacity>
-              </View>
-              <ScrollView style={{ padding: 16 }} contentContainerStyle={{ paddingBottom: 16 }}>
+      {formVisible && (
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.fullFormContainer}>
+          <View style={styles.fullFormHeader}>
+            <TouchableOpacity onPress={() => setFormVisible(false)} style={styles.headerBackBtn}>
+              <Ionicons name="arrow-back" size={22} color="#111" />
+            </TouchableOpacity>
+            <Text style={styles.fullFormTitle}>{editingId ? 'Edit Address' : 'Add New Address'}</Text>
+            <View style={{ width: 40 }} />
+          </View>
+          <ScrollView style={styles.fullFormScroll} contentContainerStyle={{ paddingBottom: 32 }}>
                 <Text style={styles.inputLabel}>Label</Text>
                 <TextInput style={styles.input} placeholder="Home / Work" value={label} onChangeText={setLabel} />
 
@@ -281,7 +336,19 @@ const AddressBook = () => {
                 <TextInput style={styles.input} placeholder="Receiver's name" value={fullName} onChangeText={setFullName} />
 
                 <Text style={styles.inputLabel}>Phone <Text style={styles.requiredStar}>*</Text></Text>
-                <TextInput style={styles.input} placeholder="Phone number" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
+                <TextInput 
+                  style={styles.input} 
+                  placeholder="10-digit phone number" 
+                  value={phone} 
+                  onChangeText={(text) => {
+                    const cleaned = text.replace(/\D/g, '');
+                    if (cleaned.length <= 10) {
+                      setPhone(cleaned);
+                    }
+                  }}
+                  keyboardType="phone-pad" 
+                  maxLength={10}
+                />
 
                 <Text style={styles.inputLabel}>Street Address 1 <Text style={styles.requiredStar}>*</Text></Text>
                 <TextInput style={styles.input} placeholder="House no, Street" value={line1} onChangeText={setLine1} />
@@ -295,11 +362,21 @@ const AddressBook = () => {
                 <View style={styles.row}>
                   <View style={{ flex: 1, marginRight: 8 }}>
                     <Text style={styles.inputLabel}>City <Text style={styles.requiredStar}>*</Text></Text>
-                    <TextInput style={styles.input} placeholder="City" value={city} onChangeText={setCity} />
+                    <TextInput 
+                      style={styles.input} 
+                      placeholder="Start typing city"
+                      value={city} 
+                      onChangeText={(t) => { setCity(t); setPlaceQuery(t); }} 
+                    />
                   </View>
                   <View style={{ flex: 1, marginLeft: 8 }}>
                     <Text style={styles.inputLabel}>State <Text style={styles.requiredStar}>*</Text></Text>
-                    <TextInput style={styles.input} placeholder="State" value={stateName} onChangeText={setStateName} />
+                    <TextInput 
+                      style={styles.input} 
+                      placeholder="State"
+                      value={stateName} 
+                      onChangeText={(t) => { setStateName(t); setPlaceQuery(t); }} 
+                    />
                   </View>
                 </View>
 
@@ -310,9 +387,38 @@ const AddressBook = () => {
                   </View>
                   <View style={{ flex: 1, marginLeft: 8 }}>
                     <Text style={styles.inputLabel}>Country <Text style={styles.requiredStar}>*</Text></Text>
-                    <TextInput style={styles.input} placeholder="Country" value={country} onChangeText={setCountry} />
+                    <TextInput 
+                      style={styles.input} 
+                      placeholder="Country" 
+                      value={country} 
+                      onChangeText={(t) => { setCountry(t); setPlaceQuery(t); }} 
+                    />
                   </View>
                 </View>
+
+                {/* Autocomplete results */}
+                {placeResults.length > 0 && (
+                  <View style={styles.autocompleteBox}>
+                    {placeResults.map((p, idx) => (
+                      <TouchableOpacity
+                        key={`${p.description}-${idx}`}
+                        style={styles.autocompleteItem}
+                        onPress={() => {
+                          // Split description to fill entries best-effort: "City, State, Country"
+                          const parts = p.description.split(',').map((s) => s.trim());
+                          if (parts[0]) setCity(parts[0]);
+                          if (parts[1]) setStateName(parts[1]);
+                          if (parts[2]) setCountry(parts[2]);
+                          setPlaceResults([]);
+                          setPlaceQuery('');
+                        }}
+                      >
+                        <Ionicons name="location-outline" size={16} color="#666" style={{ marginRight: 8 }} />
+                        <Text style={styles.autocompleteText}>{p.description}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
 
                 <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 12 }}>
                   <TouchableOpacity onPress={() => setIsDefault(!isDefault)} style={styles.checkbox}>
@@ -320,19 +426,17 @@ const AddressBook = () => {
                   </TouchableOpacity>
                   <Text style={{ marginLeft: 8, color: '#374151', fontWeight: '600' }}>Set as default address</Text>
                 </View>
-              </ScrollView>
-              <View style={styles.modalFooter}>
-                <TouchableOpacity style={styles.secondaryBtn} onPress={() => setFormVisible(false)}>
-                  <Text style={styles.secondaryBtnText}>Cancel</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.primaryBtn} onPress={saveAddress}>
-                  <Text style={styles.primaryBtnText}>Save</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
+          </ScrollView>
+          <View style={styles.fullFormFooter}>
+            <TouchableOpacity style={styles.secondaryBtn} onPress={() => setFormVisible(false)}>
+              <Text style={styles.secondaryBtnText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.primaryBtn} onPress={saveAddress}>
+              <Text style={styles.primaryBtnText}>Save</Text>
+            </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
-      </Modal>
+      )}
     </SafeAreaView>
   );
 };
@@ -368,6 +472,16 @@ const styles = StyleSheet.create({
   primaryBtn: { flex: 1, marginLeft: 8, paddingVertical: 12, borderRadius: 10, alignItems: 'center', backgroundColor: '#F53F7A' },
   primaryBtnText: { color: '#fff', fontWeight: '700' },
   checkbox: { width: 18, height: 18, borderRadius: 4, backgroundColor: '#F53F7A', alignItems: 'center', justifyContent: 'center' },
+  autocompleteBox: { marginTop: 8, borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 8, backgroundColor: '#fff' },
+  autocompleteItem: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#f3f4f6' },
+  autocompleteText: { color: '#374151', fontSize: 14 },
+  // Full-screen form styles
+  fullFormContainer: { flex: 1, backgroundColor: '#fff' },
+  fullFormHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#eee', backgroundColor: '#fff' },
+  fullFormTitle: { fontSize: 18, fontWeight: '700', color: '#111' },
+  headerBackBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  fullFormScroll: { paddingHorizontal: 16, paddingTop: 8 },
+  fullFormFooter: { flexDirection: 'row', justifyContent: 'space-between', padding: 16, borderTopWidth: 1, borderTopColor: '#eee', backgroundColor: '#fff' },
 });
 
 export default AddressBook;

@@ -15,7 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useUser } from '~/contexts/UserContext';
 import { usePreview } from '~/contexts/PreviewContext';
-import { akoolService, AkoolTaskStatus } from '~/utils/akoolService';
+import { akoolService, FaceSwapTaskStatus } from '~/utils/akoolService';
 import Toast from 'react-native-toast-message';
 import { useTranslation } from 'react-i18next';
 
@@ -36,7 +36,7 @@ const FaceSwap = () => {
   const { t } = useTranslation();
 
   const [isProcessing, setIsProcessing] = useState(false);
-  const [taskStatus, setTaskStatus] = useState<AkoolTaskStatus | null>(null);
+  const [taskStatus, setTaskStatus] = useState<FaceSwapTaskStatus | null>(null);
   const [resultImages, setResultImages] = useState<string[]>([]);
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
   const [coinBalance, setCoinBalance] = useState(0);
@@ -86,14 +86,6 @@ const FaceSwap = () => {
     setTaskStatus({ status: 'pending' });
 
     try {
-      // Deduct coins first
-      const coinsDeducted = await akoolService.deductCoins(userData.id, PHOTO_PREVIEW_COST);
-      if (!coinsDeducted) {
-        Alert.alert(t('error'), t('failed_to_deduct_coins'));
-        setIsProcessing(false);
-        return;
-      }
-
       // Update local coin balance
       setCoinBalance(prev => prev - PHOTO_PREVIEW_COST);
 
@@ -213,61 +205,38 @@ const FaceSwap = () => {
 
   const renderResults = () => (
     <View style={styles.resultsContainer}>
-      <Text style={styles.resultsTitle}>{t('your_personalized_images')}</Text>
+      <Text style={styles.resultsTitle}>Your Face Swap Result</Text>
       <Text style={styles.resultsSubtitle}>
-        {t('here_are_3_styled_product_images_with_your_face')}
+        Here's your personalized product image
       </Text>
 
-      {/* Main Image Display */}
+      {/* Single Image Display */}
       <View style={styles.mainImageContainer}>
         <Image 
-          source={{ uri: resultImages[selectedImageIndex] }} 
+          source={{ uri: resultImages[0] }} 
           style={styles.mainImage}
           resizeMode="cover"
         />
-        <View style={styles.imageCounter}>
-          <Text style={styles.imageCounterText}>
-            {selectedImageIndex + 1} / {resultImages.length}
-          </Text>
-        </View>
       </View>
 
-      {/* Thumbnail Navigation */}
-      <ScrollView 
-        horizontal 
-        showsHorizontalScrollIndicator={false}
-        style={styles.thumbnailsContainer}
-      >
-        {resultImages.map((imageUrl, index) => (
-          <TouchableOpacity
-            key={index}
-            style={[
-              styles.thumbnail,
-              selectedImageIndex === index && styles.selectedThumbnail
-            ]}
-            onPress={() => setSelectedImageIndex(index)}
-          >
-            <Image source={{ uri: imageUrl }} style={styles.thumbnailImage} />
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-
-      {/* Action Buttons */}
+      {/* Action Buttons - Share and Shop Now */}
       <View style={styles.actionButtons}>
         <TouchableOpacity 
-          style={styles.actionButton}
-          onPress={() => handleSaveImage(resultImages[selectedImageIndex])}
+          style={[styles.actionButton, styles.primaryButton]}
+          onPress={() => handleShareImage(resultImages[0])}
         >
-          <Ionicons name="download-outline" size={20} color="#F53F7A" />
-          <Text style={styles.actionButtonText}>{t('save')}</Text>
+          <Ionicons name="share-outline" size={20} color="#fff" />
+          <Text style={[styles.actionButtonText, styles.primaryButtonText]}>Share</Text>
         </TouchableOpacity>
         
         <TouchableOpacity 
-          style={styles.actionButton}
-          onPress={() => handleShareImage(resultImages[selectedImageIndex])}
+          style={[styles.actionButton, styles.primaryButton]}
+          onPress={() => {
+            (navigation as any).navigate('ProductDetails', { productId });
+          }}
         >
-          <Ionicons name="share-outline" size={20} color="#F53F7A" />
-          <Text style={styles.actionButtonText}>{t('share')}</Text>
+          <Ionicons name="cart-outline" size={20} color="#fff" />
+          <Text style={[styles.actionButtonText, styles.primaryButtonText]}>Shop Now</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -618,6 +587,17 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#F53F7A',
+  },
+  primaryButton: {
+    backgroundColor: '#F53F7A',
+    shadowColor: '#F53F7A',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  primaryButtonText: {
+    color: '#fff',
   },
 });
 

@@ -9,20 +9,11 @@ CREATE TABLE IF NOT EXISTS settings (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Insert Razorpay configuration
-INSERT INTO settings (key, value, description) VALUES 
-('razorpay_key_id', 'rzp_test_RJTvncgwxkUdWE', 'Razorpay Key ID for payment processing')
-ON CONFLICT (key) DO UPDATE SET 
-  value = EXCLUDED.value,
-  description = EXCLUDED.description,
-  updated_at = NOW();
-
--- Insert other common settings
+-- Insert common settings
 INSERT INTO settings (key, value, description) VALUES 
 ('app_name', 'Only2U', 'Application name'),
 ('app_version', '1.0.0', 'Current application version'),
-('maintenance_mode', 'false', 'Enable/disable maintenance mode'),
-('razorpay_webhook_secret', '', 'Razorpay webhook secret for payment verification')
+('maintenance_mode', 'false', 'Enable/disable maintenance mode')
 ON CONFLICT (key) DO NOTHING;
 
 -- Create RLS policies for settings table

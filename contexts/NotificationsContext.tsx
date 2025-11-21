@@ -9,10 +9,13 @@ export type AppNotification = {
   image?: string;
   timeIso: string;
   unread: boolean;
+  productId?: string; // For face swap notifications
+  resultImages?: string[]; // For face swap result images
 };
 
 type NotificationsContextType = {
   notifications: AppNotification[];
+  unreadCount: number;
   addNotification: (n: Omit<AppNotification, 'id' | 'timeIso' | 'unread'> & { timeIso?: string }) => Promise<void>;
   markAllRead: () => Promise<void>;
   removeNotification: (id: string) => Promise<void>;
@@ -24,6 +27,9 @@ const NotificationsContext = createContext<NotificationsContextType | undefined>
 export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { userData } = useUser();
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  
+  // Calculate unread count
+  const unreadCount = notifications.filter(n => n.unread).length;
 
   const storageKey = userData?.id ? `notifications_${userData.id}` : undefined;
 
@@ -72,7 +78,7 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
   };
 
   return (
-    <NotificationsContext.Provider value={{ notifications, addNotification, markAllRead, removeNotification, clear }}>
+    <NotificationsContext.Provider value={{ notifications, unreadCount, addNotification, markAllRead, removeNotification, clear }}>
       {children}
     </NotificationsContext.Provider>
   );

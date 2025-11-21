@@ -34,8 +34,13 @@ const Admin = () => {
   const { t } = useTranslation();
 
   useEffect(() => {
+    // Check if user is admin before allowing access
+    if (user?.user_type !== 'admin') {
+      navigation.goBack();
+      return;
+    }
     fetchAdminStats();
-  }, []);
+  }, [user, navigation]);
 
   const fetchAdminStats = async () => {
     try {
@@ -134,7 +139,7 @@ const Admin = () => {
       title: t('order_management'),
       subtitle: t('view_and_manage_all_orders'),
       icon: 'receipt-outline',
-      onPress: () => console.log('Order Management'),
+      onPress: () => navigation.navigate('OrderManagement' as never),
     },
     {
       id: 6,
@@ -148,13 +153,54 @@ const Admin = () => {
       title: t('settings'),
       subtitle: t('app_configuration_and_settings'),
       icon: 'settings-outline',
-      onPress: () => console.log('Settings'),
+      onPress: () => navigation.navigate('SettingsManagement' as never),
     },
   ];
 
   const formatCurrency = (amount: number) => {
     return `₹${amount.toLocaleString('en-IN')}`;
   };
+
+  // Show loading screen if user data is not loaded yet
+  if (!user) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={handleBackPress} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={24} color="#333" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>{t('admin_panel')}</Text>
+          <View style={styles.headerSpacer} />
+        </View>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#F53F7A" />
+          <Text style={styles.loadingText}>{t('loading')}</Text>
+        </View>
+      </View>
+    );
+  }
+
+  // If user is not admin, show access denied
+  if (user.user_type !== 'admin') {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={handleBackPress} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={24} color="#333" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>{t('access_denied')}</Text>
+          <View style={styles.headerSpacer} />
+        </View>
+        <View style={styles.accessDeniedContainer}>
+          <Ionicons name="shield-outline" size={64} color="#FF6B6B" />
+          <Text style={styles.accessDeniedTitle}>{t('access_denied')}</Text>
+          <Text style={styles.accessDeniedMessage}>
+            {t('admin_access_required')}
+          </Text>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -395,6 +441,25 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#333',
     marginLeft: 8,
+  },
+  accessDeniedContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 40,
+  },
+  accessDeniedTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#FF6B6B',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  accessDeniedMessage: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    lineHeight: 24,
   },
 });
 

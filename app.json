@@ -2,7 +2,8 @@
   "expo": {
     "name": "Only2U",
     "slug": "only2u",
-    "version": "1.0.1",
+    "description": "Official Only2U app by Only2U Fashion Private Limited, delivering AI-powered fashion commerce.",
+    "version": "1.0.2",
     "scheme": "only2u",
     "platforms": ["ios", "android"],
     "web": {
@@ -30,12 +31,19 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.only2u.only2u",
+      "deploymentTarget": "13.4",
       "associatedDomains": ["applinks:only2u.app", "applinks:*.only2u.app"],
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "NSPhotoLibraryUsageDescription": "This app needs access to your photo library to allow you to select and upload images for face swap and product customization features.",
-        "NSMicrophoneUsageDescription": "This app needs access to your microphone for voice commands and audio input during video recording and face swap features.",
-        "NSSpeechRecognitionUsageDescription": "This app uses speech recognition to enable voice commands and improve accessibility for hands-free navigation and product search."
+        "NSCameraUsageDescription": "Only2U needs access to your camera to take photos for your profile picture and to enable AI face swap previews that show you how products look on you.",
+        "NSPhotoLibraryUsageDescription": "Only2U needs access to your photo library to select photos for your profile picture, enable face swap previews, and allow product customization with AI technology.",
+        "NSPhotoLibraryAddUsageDescription": "Only2U needs permission to save your face swap results and personalized product images to your photo library.",
+        "NSMicrophoneUsageDescription": "Only2U needs access to your microphone for recording videos and creating personalized content with products.",
+        "NSSpeechRecognitionUsageDescription": "Only2U uses speech recognition to enable voice commands and improve accessibility for hands-free navigation and product search.",
+        "NSContactsUsageDescription": "Only2U needs access to your contacts to help you connect with friends already using the app."
+      },
+      "config": {
+        "usesNonExemptEncryption": false
       }
     },
     "android": {
@@ -49,9 +57,9 @@
         "android.permission.RECORD_AUDIO",
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
-        
         "android.permission.INTERNET",
-        "android.permission.ACCESS_NETWORK_STATE"
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.READ_CONTACTS"
       ],
       "intentFilters": [
         {
@@ -62,6 +70,11 @@
               "scheme": "https",
               "host": "only2u.app",
               "pathPrefix": "/shared-collection"
+            },
+            {
+              "scheme": "https",
+              "host": "only2u.app",
+              "pathPrefix": "/product"
             },
             {
               "scheme": "only2u"

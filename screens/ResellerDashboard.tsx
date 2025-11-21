@@ -16,10 +16,10 @@ import { ResellerService } from '~/services/resellerService';
 import { useUser } from '~/contexts/UserContext';
 import type { ResellerDashboard, Reseller } from '~/types/reseller';
 
-const ResellerDashboard = () => {
+export default function ResellerDashboard() {
   const navigation = useNavigation();
   const { userData } = useUser();
-  
+
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [dashboardData, setDashboardData] = useState<ResellerDashboard | null>(null);
@@ -31,15 +31,18 @@ const ResellerDashboard = () => {
 
   const fetchDashboardData = async () => {
     if (!userData?.id) return;
-    
+
     try {
       setLoading(true);
-      const [reseller, dashboard] = await Promise.all([
-        ResellerService.getResellerByUserId(userData.id),
-        ResellerService.getResellerDashboard(userData.id)
-      ]);
-      
-      setResellerInfo(reseller);
+      const resellerProfile = await ResellerService.getResellerByUserId(userData.id);
+      setResellerInfo(resellerProfile);
+
+      if (!resellerProfile) {
+        setDashboardData(null);
+        return;
+      }
+
+      const dashboard = await ResellerService.getResellerDashboard(resellerProfile.id);
       setDashboardData(dashboard);
     } catch (error: any) {
       console.error('Error fetching dashboard data:', error);
@@ -62,8 +65,8 @@ const ResellerDashboard = () => {
     color: string;
     onPress?: () => void;
   }) => (
-    <TouchableOpacity 
-      style={[styles.statCard, onPress && styles.statCardPressable]} 
+    <TouchableOpacity
+      style={[styles.statCard, onPress && styles.statCardPressable]}
       onPress={onPress}
       disabled={!onPress}
     >
@@ -103,7 +106,7 @@ const ResellerDashboard = () => {
           <Text style={styles.headerTitle}>Reseller Dashboard</Text>
           <View style={styles.placeholder} />
         </View>
-        
+
         <View style={styles.notResellerContainer}>
           <Ionicons name="person-add" size={64} color="#999" />
           <Text style={styles.notResellerTitle}>Not a Reseller Yet?</Text>
@@ -140,7 +143,7 @@ const ResellerDashboard = () => {
         </TouchableOpacity>
       </View>
 
-      <ScrollView 
+      <ScrollView
         style={styles.content}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
@@ -195,7 +198,12 @@ const ResellerDashboard = () => {
 
         {/* Earnings Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Earnings Overview</Text>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Earnings Overview</Text>
+            <TouchableOpacity onPress={() => navigation.navigate('YourEarnings' as never)}>
+              <Text style={styles.viewAllText}>View Details</Text>
+            </TouchableOpacity>
+          </View>
           <View style={styles.earningsGrid}>
             <View style={styles.earningsCard}>
               <Text style={styles.earningsLabel}>Total Earnings</Text>
@@ -573,6 +581,15 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     marginBottom: 8,
   },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  viewAllText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#F53F7A',
+  },
 });
-
-export default ResellerDashboard;

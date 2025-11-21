@@ -251,7 +251,7 @@ const UserManagement = () => {
           <View style={styles.userHeader}>
             <Text style={styles.userName}>{user.name}</Text>
             <View style={[styles.roleBadge, { backgroundColor: getRoleColor(user.role) }]}>
-              <Text style={styles.roleText}>{user.role.toUpperCase()}</Text>
+              <Text style={styles.roleText}>{(user.role || 'user').toUpperCase()}</Text>
             </View>
           </View>
           <Text style={styles.userEmail}>{user.email}</Text>

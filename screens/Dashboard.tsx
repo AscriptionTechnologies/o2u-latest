@@ -16,19 +16,22 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { MaterialIcons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { useCallback } from 'react';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import type { RootStackParamList } from '~/types/navigation';
 import { supabase } from '~/utils/supabase';
 import { useWishlist } from '~/contexts/WishlistContext';
 import { useUser } from '~/contexts/UserContext';
-import { useTranslation } from 'react-i18next';
-import i18n from '../utils/i18n';
+import { useNotifications } from '~/contexts/NotificationsContext';
 import { getFirstSafeImageUrl, getProductImages, getFirstSafeProductImage } from '../utils/imageUtils';
 import type { Product, Category } from '~/types/product';
+import { Only2ULogo } from '../components/common';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
 import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
+import Toast from 'react-native-toast-message';
+import { LinearGradient } from 'expo-linear-gradient';
 
 type DashboardNavigationProp = StackNavigationProp<RootStackParamList>;
 
@@ -48,23 +51,33 @@ interface Address {
   created_at?: string;
 }
 
+interface FeatureSection {
+  id: string;
+  section_type: 'best_seller' | 'trending' | 'categories';
+  display_order: number;
+  is_active: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
 const Dashboard = () => {
   const navigation = useNavigation<DashboardNavigationProp>();
   const [categories, setCategories] = useState<Category[]>([]);
   const [trendingProducts, setTrendingProducts] = useState<Product[]>([]);
   const [bestSellerProducts, setBestSellerProducts] = useState<Product[]>([]);
   const [categoryProducts, setCategoryProducts] = useState<{ [categoryId: string]: Product[] }>({});
+  const [featureSections, setFeatureSections] = useState<FeatureSection[]>([]);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [hasError, setHasError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
-  const { wishlist } = useWishlist();
+  const { wishlist, unreadCount: wishlistUnreadCount } = useWishlist();
+  const { unreadCount: notificationUnreadCount } = useNotifications();
   const { userData, updateUserData } = useUser();
   const [searchText, setSearchText] = useState('');
   const [showSearchBar, setShowSearchBar] = useState(false);
   const searchBarAnim = useRef(new Animated.Value(0)).current; // 0: header, 1: search bar
   const scrollY = useRef(new Animated.Value(0)).current;
-  const { t } = useTranslation();
   const [langMenuVisible, setLangMenuVisible] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
   const [addresses, setAddresses] = useState<Address[]>([]);
@@ -77,6 +90,25 @@ const Dashboard = () => {
   const [checkingPincode, setCheckingPincode] = useState(false);
   const [pincodeAvailable, setPincodeAvailable] = useState<boolean | null>(null);
   const shimmerAnimation = useRef(new Animated.Value(0)).current;
+  
+  // Welcome animations
+  const [showWelcomeAnimation, setShowWelcomeAnimation] = useState(false);
+  const welcomeOpacity = useRef(new Animated.Value(0)).current;
+  const welcomeScale = useRef(new Animated.Value(0.3)).current;
+  const contentOpacity = useRef(new Animated.Value(0)).current;
+  const headerSlide = useRef(new Animated.Value(-100)).current;
+  const floatingElements = useRef([...Array(12)].map(() => ({
+    translateY: new Animated.Value(0),
+    translateX: new Animated.Value(0),
+    opacity: new Animated.Value(0),
+    rotate: new Animated.Value(0),
+    scale: new Animated.Value(1),
+  }))).current;
+  const logoGlow = useRef(new Animated.Value(0)).current;
+  const shimmerPosition = useRef(new Animated.Value(-1)).current;
+  const rippleScale = useRef(new Animated.Value(0)).current;
+  const rippleOpacity = useRef(new Animated.Value(0)).current;
+  const gradientAnimation = useRef(new Animated.Value(0)).current;
   
   // Cache for data
   const [lastFetchTime, setLastFetchTime] = useState<number>(0);
@@ -111,6 +143,268 @@ const Dashboard = () => {
     return () => clearTimeout(timeout);
   }, [userData?.id]);
 
+  // Refresh addresses when the screen regains focus (e.g., after AddAddress)
+  useFocusEffect(
+    useCallback(() => {
+      if (userData?.id) fetchAddresses();
+    }, [userData?.id])
+  );
+
+  // Also refresh when address bottom sheet is opened
+  useEffect(() => {
+    if (addressSheetVisible && userData?.id) {
+      fetchAddresses();
+    }
+  }, [addressSheetVisible, userData?.id]);
+
+  // Realtime: refresh addresses when user updates Address Book
+  useEffect(() => {
+    if (!userData?.id) return;
+
+    const channel = supabase
+      .channel(`user_addresses_${userData.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'user_addresses',
+          filter: `user_id=eq.${userData.id}`,
+        },
+        () => {
+          // Re-fetch addresses so the bottom sheet reflects latest state
+          fetchAddresses();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      try {
+        supabase.removeChannel(channel);
+      } catch {}
+    };
+  }, [userData?.id]);
+
+  // Welcome animation effect - runs once on first load
+  useEffect(() => {
+    const checkFirstLaunch = async () => {
+      try {
+        const hasSeenWelcome = await AsyncStorage.getItem('dashboard_welcome_seen');
+        if (!hasSeenWelcome) {
+          setShowWelcomeAnimation(true);
+          await AsyncStorage.setItem('dashboard_welcome_seen', 'true');
+          startWelcomeAnimation();
+        } else {
+          // Start quick entrance animation
+          startQuickEntranceAnimation();
+        }
+      } catch (error) {
+        console.log('Error checking welcome status:', error);
+        startQuickEntranceAnimation();
+      }
+    };
+    
+    checkFirstLaunch();
+  }, []);
+
+  // Welcome animation sequence
+  const startWelcomeAnimation = () => {
+    // Gradient background animation
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(gradientAnimation, {
+          toValue: 1,
+          duration: 3000,
+          useNativeDriver: false,
+        }),
+        Animated.timing(gradientAnimation, {
+          toValue: 0,
+          duration: 3000,
+          useNativeDriver: false,
+        }),
+      ])
+    ).start();
+
+    // First: Show welcome splash with ripple effect
+    Animated.parallel([
+      Animated.timing(welcomeOpacity, {
+        toValue: 1,
+        duration: 600,
+        useNativeDriver: true,
+      }),
+      Animated.spring(welcomeScale, {
+        toValue: 1,
+        tension: 50,
+        friction: 7,
+        useNativeDriver: true,
+      }),
+    ]).start();
+
+    // Ripple effect
+    Animated.sequence([
+      Animated.delay(200),
+      Animated.parallel([
+        Animated.timing(rippleScale, {
+          toValue: 3,
+          duration: 1500,
+          useNativeDriver: true,
+        }),
+        Animated.timing(rippleOpacity, {
+          toValue: 0,
+          duration: 1500,
+          useNativeDriver: true,
+        }),
+      ]),
+    ]).start();
+
+    // Pulsing glow effect on logo
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(logoGlow, {
+          toValue: 1,
+          duration: 1000,
+          useNativeDriver: false,
+        }),
+        Animated.timing(logoGlow, {
+          toValue: 0,
+          duration: 1000,
+          useNativeDriver: false,
+        }),
+      ])
+    ).start();
+
+    // Shimmer effect
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(shimmerPosition, {
+          toValue: 1,
+          duration: 2000,
+          useNativeDriver: true,
+        }),
+        Animated.delay(500),
+        Animated.timing(shimmerPosition, {
+          toValue: -1,
+          duration: 0,
+          useNativeDriver: true,
+        }),
+      ])
+    ).start();
+
+    // Enhanced floating elements with more movement
+    floatingElements.forEach((element, index) => {
+      const isEven = index % 2 === 0;
+      const moveDistance = 30 + (index % 4) * 10;
+      const horizontalMove = isEven ? 15 : -15;
+      
+      Animated.loop(
+        Animated.sequence([
+          Animated.parallel([
+            Animated.timing(element.translateY, {
+              toValue: -moveDistance,
+              duration: 2000 + (index * 150),
+              useNativeDriver: true,
+            }),
+            Animated.timing(element.translateX, {
+              toValue: horizontalMove,
+              duration: 2000 + (index * 150),
+              useNativeDriver: true,
+            }),
+            Animated.timing(element.rotate, {
+              toValue: isEven ? 1 : -1,
+              duration: 2000 + (index * 150),
+              useNativeDriver: true,
+            }),
+            Animated.sequence([
+              Animated.timing(element.scale, {
+                toValue: 1.2,
+                duration: 1000 + (index * 75),
+                useNativeDriver: true,
+              }),
+              Animated.timing(element.scale, {
+                toValue: 1,
+                duration: 1000 + (index * 75),
+                useNativeDriver: true,
+              }),
+            ]),
+          ]),
+          Animated.parallel([
+            Animated.timing(element.translateY, {
+              toValue: 0,
+              duration: 2000 + (index * 150),
+              useNativeDriver: true,
+            }),
+            Animated.timing(element.translateX, {
+              toValue: 0,
+              duration: 2000 + (index * 150),
+              useNativeDriver: true,
+            }),
+            Animated.timing(element.rotate, {
+              toValue: 0,
+              duration: 2000 + (index * 150),
+              useNativeDriver: true,
+            }),
+          ]),
+        ])
+      ).start();
+
+      // Staggered fade in for floating elements
+      Animated.timing(element.opacity, {
+        toValue: index < 6 ? 0.7 : 0.4, // Vary opacity for depth
+        duration: 500,
+        delay: 100 + (index * 80),
+        useNativeDriver: true,
+      }).start();
+    });
+
+    // After 2.5 seconds, hide welcome and show content
+    setTimeout(() => {
+      Animated.parallel([
+        Animated.timing(welcomeOpacity, {
+          toValue: 0,
+          duration: 500,
+          useNativeDriver: true,
+        }),
+        Animated.timing(contentOpacity, {
+          toValue: 1,
+          duration: 700,
+          useNativeDriver: true,
+        }),
+        Animated.spring(headerSlide, {
+          toValue: 0,
+          tension: 40,
+          friction: 8,
+          useNativeDriver: true,
+        }),
+      ]).start(() => {
+        setShowWelcomeAnimation(false);
+        // Fade out floating elements
+        floatingElements.forEach((element) => {
+          Animated.timing(element.opacity, {
+            toValue: 0,
+            duration: 300,
+            useNativeDriver: true,
+          }).start();
+        });
+      });
+    }, 2500);
+  };
+
+  // Quick entrance animation for returning users
+  const startQuickEntranceAnimation = () => {
+    Animated.parallel([
+      Animated.timing(contentOpacity, {
+        toValue: 1,
+        duration: 400,
+        useNativeDriver: true,
+      }),
+      Animated.timing(headerSlide, {
+        toValue: 0,
+        duration: 350,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  };
+
   // Fetch user addresses
   const fetchAddresses = async () => {
     if (!userData?.id) return;
@@ -128,8 +422,28 @@ const Dashboard = () => {
         return;
       }
       
-      setAddresses(data || []);
-      const defaultAddr = data?.find((addr: Address) => addr.is_default);
+      const list = data || [];
+
+      // Normalize: ensure at most one default
+      const defaults = list.filter((a: Address) => a.is_default);
+      if (defaults.length > 1) {
+        // Keep the most recently created as default; unset others
+        const keep = defaults[0];
+        const unsetIds = defaults.slice(1).map((a: Address) => a.id);
+        try {
+          if (unsetIds.length) {
+            await supabase.from('user_addresses').update({ is_default: false }).in('id', unsetIds);
+          }
+        } catch (e) {
+          console.log('Normalize defaults failed:', e);
+        }
+        // Reflect in UI
+        const normalized = list.map((a: Address) => ({ ...a, is_default: a.id === keep.id }));
+        setAddresses(normalized);
+      } else {
+        setAddresses(list);
+      }
+      const defaultAddr = (list || []).find((addr: Address) => addr.is_default);
       if (defaultAddr) {
         setSelectedAddress(defaultAddr);
       } else if (data && data.length > 0) {
@@ -143,6 +457,15 @@ const Dashboard = () => {
   // Handle address selection
   const handleAddressSelect = async (address: Address) => {
     setSelectedAddress(address);
+    // Persist selection as default so other parts of app stay consistent
+    try {
+      if (userData?.id) {
+        await supabase.from('user_addresses').update({ is_default: false }).eq('user_id', userData.id);
+        await supabase.from('user_addresses').update({ is_default: true }).eq('id', address.id);
+      }
+    } catch (e) {
+      console.log('Failed to set default address:', e);
+    }
     setAddressSheetVisible(false);
     addressSheetRef.current?.close();
   };
@@ -327,6 +650,7 @@ const Dashboard = () => {
       
       // Fetch all data in parallel
       await Promise.all([
+        fetchFeatureSections(),
         fetchCategories(),
         fetchFeaturedProducts(),
       ]);
@@ -413,13 +737,32 @@ const Dashboard = () => {
     shimmerLoop();
   }, [shimmerAnimation]);
 
+  const fetchFeatureSections = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('feature_sections')
+        .select('*')
+        .eq('is_active', true)
+        .order('display_order', { ascending: true });
+
+      if (error) {
+        console.error('Error fetching feature sections:', error);
+        return;
+      }
+
+      setFeatureSections(data || []);
+    } catch (error) {
+      console.error('Error fetching feature sections:', error);
+    }
+  };
+
   const fetchCategories = async () => {
     try {
       const { data, error } = await supabase
         .from('categories')
         .select('*')
         .eq('is_active', true)
-        .order('created_at', { ascending: false });
+        .order('display_order', { ascending: true, nullsFirst: false });
 
       if (error) {
         console.error('Error fetching categories:', error);
@@ -451,6 +794,7 @@ const Dashboard = () => {
           return_policy,
           vendor_name,
           alias_vendor,
+          sku,
           created_at,
           updated_at,
           product_variants(
@@ -506,6 +850,7 @@ const Dashboard = () => {
           return_policy,
           vendor_name,
           alias_vendor,
+          sku,
           created_at,
           updated_at,
           product_variants(
@@ -571,6 +916,7 @@ const Dashboard = () => {
               return_policy,
               vendor_name,
               alias_vendor,
+              sku,
               created_at,
               updated_at,
               product_variants(
@@ -791,20 +1137,62 @@ const Dashboard = () => {
     );
   };
 
-  // Filtered products
-  const filteredTrendingProducts = trendingProducts.filter(p =>
-    p.name.toLowerCase().includes(searchText.toLowerCase())
-  );
-  const filteredBestSellerProducts = bestSellerProducts.filter(p =>
-    p.name.toLowerCase().includes(searchText.toLowerCase())
-  );
+  // Helper function to check if product matches search (by name, SKU, or variant SKU)
+  const productMatchesSearch = (product: any) => {
+    if (!searchText.trim()) return true;
+    
+    const searchLower = searchText.toLowerCase().trim();
+    
+    // Search by product name
+    if (product.name?.toLowerCase().includes(searchLower)) {
+      return true;
+    }
+    
+    // Search by product SKU
+    if (product.sku?.toLowerCase().includes(searchLower)) {
+      return true;
+    }
+    
+    // Search by variant SKUs
+    if (product.variants && Array.isArray(product.variants)) {
+      return product.variants.some((variant: any) => 
+        variant.sku?.toLowerCase().includes(searchLower)
+      );
+    }
+    
+    return false;
+  };
+
+  // Get all search results (combine all products when searching)
+  const getAllSearchResults = () => {
+    if (!searchText.trim()) return [];
+    
+    const allProducts = [
+      ...trendingProducts,
+      ...bestSellerProducts,
+      ...Object.values(categoryProducts).flat(),
+    ];
+    
+    // Remove duplicates by id
+    const uniqueProducts = Array.from(
+      new Map(allProducts.map(item => [item.id, item])).values()
+    );
+    
+    return uniqueProducts.filter(productMatchesSearch);
+  };
+
+  // Check if user is actively searching
+  const isSearching = searchText.trim().length > 0;
+  const searchResults = getAllSearchResults();
+
+  // Filtered products (for individual sections when not searching)
+  const filteredTrendingProducts = trendingProducts.filter(productMatchesSearch);
+  const filteredBestSellerProducts = bestSellerProducts.filter(productMatchesSearch);
 
   // Filtered category products
   const getFilteredCategoryProducts = (categoryId: string) => {
     const products = categoryProducts[categoryId] || [];
-    return products.filter(p =>
-      p.name.toLowerCase().includes(searchText.toLowerCase())
-    );
+    return products.filter(productMatchesSearch);
   };
 
   // Scroll handler to show/hide search bar
@@ -844,14 +1232,14 @@ const Dashboard = () => {
             style={styles.seeMoreButton}
             onPress={() => navigation.navigate('Products', { category })}
           >
-            <Text style={styles.seeMoreText}>{t('see_more')}</Text>
+            <Text style={styles.seeMoreText}>See More</Text>
             <Ionicons name="chevron-forward" size={16} color="#F53F7A" />
           </TouchableOpacity>
         </View>
         {products.length === 0 ? (
           <View style={styles.emptyContainer}>
             <Ionicons name="shirt-outline" size={48} color="#999" />
-            <Text style={styles.emptyText}>{t('no_products_available')}</Text>
+            <Text style={styles.emptyText}>No products available.</Text>
           </View>
         ) : (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.productScrollView}>
@@ -862,12 +1250,157 @@ const Dashboard = () => {
     );
   };
 
+  // Render Categories Section
+  const renderCategoriesSection = () => (
+    <View style={styles.sectionContainer}>
+      {categories.length === 0 && !isInitialLoading ? (
+        <View style={styles.emptyContainer}>
+          <Ionicons name="folder-open-outline" size={48} color="#999" />
+          <Text style={styles.emptyText}>No categories available.</Text>
+        </View>
+      ) : (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryScrollView}>
+          {categories.map((category) => (
+            <TouchableOpacity
+              key={category.id}
+              style={styles.categoryCard}
+              onPress={() => navigation.navigate('Products', { category })}
+            >
+              <Image
+                source={{
+                  uri: category.image_url || 'https://images.unsplash.com/photo-1610030469983-98e550d6193c?w=300&h=200&fit=crop'
+                }}
+                style={styles.categoryImage}
+              />
+              <Text style={styles.categoryTitle}>{category.name}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      )}
+    </View>
+  );
+
+  // Render Trending Section
+  const renderTrendingSection = () => (
+    <View style={styles.sectionContainer}>
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>Trending Now</Text>
+        <TouchableOpacity
+          style={styles.seeMoreButton}
+          onPress={() => navigation.navigate('Products', {
+            category: {
+              id: 'trending',
+              name: 'Trending Products',
+              description: 'Trending products',
+              is_active: true,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            },
+            featuredType: 'trending'
+          })}
+        >
+          <Text style={styles.seeMoreText}>See More</Text>
+          <Ionicons name="chevron-forward" size={16} color="#F53F7A" />
+        </TouchableOpacity>
+      </View>
+      {filteredTrendingProducts.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <Ionicons name="trending-up-outline" size={48} color="#999" />
+          <Text style={styles.emptyText}>No trending products available.</Text>
+        </View>
+      ) : (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.productScrollView}>
+          {filteredTrendingProducts.map((product) => renderProductCard(product))}
+        </ScrollView>
+      )}
+    </View>
+  );
+
+  // Render Best Sellers Section
+  const renderBestSellersSection = () => (
+    <View style={styles.sectionContainer}>
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>Best Sellers</Text>
+        <TouchableOpacity
+          style={styles.seeMoreButton}
+          onPress={() => navigation.navigate('Products', {
+            category: {
+              id: 'best_sellers',
+              name: 'Best Sellers',
+              description: 'Best selling products',
+              is_active: true,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            },
+            featuredType: 'best_seller'
+          })}
+        >
+          <Text style={styles.seeMoreText}>See More</Text>
+          <Ionicons name="chevron-forward" size={16} color="#F53F7A" />
+        </TouchableOpacity>
+      </View>
+      {filteredBestSellerProducts.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <Ionicons name="star-outline" size={48} color="#999" />
+          <Text style={styles.emptyText}>No best sellers available.</Text>
+        </View>
+      ) : (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.productScrollView}>
+          {filteredBestSellerProducts.map((product) => renderProductCard(product))}
+        </ScrollView>
+      )}
+    </View>
+  );
+
+  // Render section based on type
+  const renderSectionByType = (section: FeatureSection) => {
+    switch (section.section_type) {
+      case 'categories':
+        return renderCategoriesSection();
+      case 'trending':
+        return renderTrendingSection();
+      case 'best_seller':
+        return renderBestSellersSection();
+      default:
+        return null;
+    }
+  };
+
+  // Render Search Results
+  const renderSearchResults = () => (
+    <View style={styles.searchResultsContainer}>
+      <View style={styles.searchResultsHeader}>
+        <Text style={styles.searchResultsTitle}>
+          {searchResults.length} {searchResults.length === 1 ? 'result' : 'results'} found for "{searchText}"
+        </Text>
+      </View>
+      
+      {searchResults.length === 0 ? (
+        <View style={styles.noResultsContainer}>
+          <Ionicons name="search-outline" size={64} color="#ccc" />
+          <Text style={styles.noResultsTitle}>No products found</Text>
+          <Text style={styles.noResultsText}>
+            Try searching with a different keyword or SKU
+          </Text>
+        </View>
+      ) : (
+        <View style={styles.searchResultsGrid}>
+          {searchResults.map((product) => (
+            <View key={product.id} style={styles.searchResultCard}>
+              {renderProductCard(product)}
+            </View>
+          ))}
+        </View>
+      )}
+    </View>
+  );
+
   const renderSearchBar = () => (
     <View style={styles.searchBarContainer}>
       <Ionicons name="search-outline" size={20} color="#888" style={{ marginRight: 8 }} />
       <TextInput
         style={styles.searchInput}
-        placeholder={t('search')}
+        placeholder="Search Product"
         placeholderTextColor="#888"
         value={searchText}
         onChangeText={setSearchText}
@@ -888,17 +1421,241 @@ const Dashboard = () => {
 
   return (
     <View style={styles.container}>
+      {/* Welcome Animation Overlay */}
+      {showWelcomeAnimation && (
+        <Animated.View 
+          style={[
+            styles.welcomeOverlay,
+            {
+              opacity: welcomeOpacity,
+            },
+          ]}
+        >
+          {/* Animated gradient background */}
+          <LinearGradient
+            colors={['#FFFFFF', '#FFF5F7', '#FFE5EC', '#FFF5F7', '#FFFFFF']}
+            style={StyleSheet.absoluteFillObject}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+          />
+
+          {/* Particles background layer */}
+          <View style={styles.particlesContainer}>
+            {[...Array(20)].map((_, i) => (
+              <View
+                key={`particle-${i}`}
+                style={[
+                  styles.particle,
+                  {
+                    left: `${Math.random() * 100}%`,
+                    top: `${Math.random() * 100}%`,
+                    width: 2 + Math.random() * 4,
+                    height: 2 + Math.random() * 4,
+                    opacity: 0.3 + Math.random() * 0.4,
+                  },
+                ]}
+              />
+            ))}
+          </View>
+
+          <Animated.View
+            style={[
+              styles.welcomeContent,
+              {
+                transform: [{ scale: welcomeScale }],
+              },
+            ]}
+          >
+            {/* Enhanced floating decorative elements with variety */}
+            {floatingElements.map((element, index) => {
+              const size = 25 + (index % 4) * 12;
+              const colors = ['#FF3F6C', '#FFE5EC', '#F53F7A', '#FF6B9D', '#FFC0DB', '#FF85A1'];
+              const shapes = ['circle', 'square', 'diamond', 'star'];
+              const shapeType = shapes[index % 4];
+              
+              return (
+                <Animated.View
+                  key={index}
+                  style={[
+                    styles.floatingElement,
+                    {
+                      left: `${10 + (index % 4) * 25}%`,
+                      top: `${15 + Math.floor(index / 4) * 28}%`,
+                      opacity: element.opacity,
+                      transform: [
+                        { translateY: element.translateY },
+                        { translateX: element.translateX },
+                        { scale: element.scale },
+                        {
+                          rotate: element.rotate.interpolate({
+                            inputRange: [-1, 0, 1],
+                            outputRange: ['-180deg', '0deg', '180deg'],
+                          }),
+                        },
+                      ],
+                    },
+                  ]}
+                >
+                  {shapeType === 'circle' && (
+                    <View style={[
+                      styles.floatingShape,
+                      {
+                        backgroundColor: colors[index % colors.length],
+                        width: size,
+                        height: size,
+                        borderRadius: size / 2,
+                      },
+                    ]} />
+                  )}
+                  {shapeType === 'square' && (
+                    <View style={[
+                      styles.floatingShape,
+                      {
+                        backgroundColor: colors[index % colors.length],
+                        width: size,
+                        height: size,
+                        borderRadius: 8,
+                      },
+                    ]} />
+                  )}
+                  {shapeType === 'diamond' && (
+                    <View style={[
+                      styles.floatingShape,
+                      {
+                        backgroundColor: colors[index % colors.length],
+                        width: size,
+                        height: size,
+                        borderRadius: 4,
+                        transform: [{ rotate: '45deg' }],
+                      },
+                    ]} />
+                  )}
+                  {shapeType === 'star' && (
+                    <View style={[
+                      styles.floatingShape,
+                      styles.starShape,
+                      {
+                        backgroundColor: colors[index % colors.length],
+                        width: size,
+                        height: size,
+                      },
+                    ]} />
+                  )}
+                </Animated.View>
+              );
+            })}
+
+            {/* Ripple effect behind logo */}
+            <Animated.View
+              style={[
+                styles.rippleCircle,
+                {
+                  opacity: rippleOpacity.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0.6, 0],
+                  }),
+                  transform: [{ scale: rippleScale }],
+                },
+              ]}
+            />
+
+            {/* Welcome message with enhanced effects */}
+            <View style={styles.welcomeMessageContainer}>
+              {/* Logo with glow effect */}
+              <Animated.View
+                style={[
+                  styles.logoCircle,
+                  {
+                    shadowOpacity: logoGlow.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0.4, 0.8],
+                    }),
+                    shadowRadius: logoGlow.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [20, 35],
+                    }),
+                  },
+                ]}
+              >
+                <LinearGradient
+                  colors={['#FF3F6C', '#F53F7A', '#FF6B9D']}
+                  style={styles.logoGradient}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                >
+                  <Text style={styles.logoText}>O<Text style={styles.logoSubText}>2</Text>U</Text>
+                </LinearGradient>
+
+                {/* Shimmer overlay */}
+                <Animated.View
+                  style={[
+                    styles.shimmerOverlay,
+                    {
+                      transform: [{
+                        translateX: shimmerPosition.interpolate({
+                          inputRange: [-1, 1],
+                          outputRange: [-200, 200],
+                        }),
+                      }],
+                    },
+                  ]}
+                >
+                  <LinearGradient
+                    colors={['transparent', 'rgba(255, 255, 255, 0.6)', 'transparent']}
+                    style={{ width: 100, height: 120 }}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                  />
+                </Animated.View>
+              </Animated.View>
+
+              {/* Animated text */}
+              <View style={styles.textContainer}>
+                <Text style={styles.welcomeTitle}>
+                  <Text style={styles.welcomeTitleGradient}>Welcome to </Text>
+                  <Text style={styles.welcomeTitleBrand}>Only2U</Text>
+                </Text>
+                <View style={styles.subtitleContainer}>
+                  <Ionicons name="sparkles" size={16} color="#F53F7A" />
+                  <Text style={styles.welcomeSubtitle}>Your personalized fashion experience</Text>
+                  <Ionicons name="sparkles" size={16} color="#F53F7A" />
+                </View>
+              </View>
+
+              {/* Decorative dots */}
+              <View style={styles.dotsContainer}>
+                {[0, 1, 2].map((i) => (
+                  <View
+                    key={i}
+                    style={[
+                      styles.decorativeDot,
+                      { backgroundColor: i === 1 ? '#FF3F6C' : '#FFE5EC' },
+                    ]}
+                  />
+                ))}
+              </View>
+            </View>
+          </Animated.View>
+        </Animated.View>
+      )}
+
+      {/* Animated Content Wrapper */}
+      <Animated.View 
+        style={[
+          styles.contentWrapper,
+          {
+            opacity: contentOpacity,
+          },
+        ]}
+      >
       {/* Enhanced Header with Integrated Search */}
+        <Animated.View style={{ transform: [{ translateY: headerSlide }] }}>
       <SafeAreaView edges={['top']} style={styles.safeHeader}>
         <View style={styles.header}>
           {/* Top Row: Logo + Actions */}
           <View style={styles.headerTopRow}>
             <View style={styles.logoContainer}>
-              <Text style={styles.logo}>
-                <Text>Only</Text>
-                <Text style={{ color: '#F53F7A' }}>2</Text>
-                <Text>U</Text>
-              </Text>
+              <Only2ULogo size="medium" />
               <TouchableOpacity 
                 style={styles.locationRow}
                 onPress={() => {
@@ -917,40 +1674,16 @@ const Dashboard = () => {
             </View>
 
             <View style={styles.headerRight}>
-              <View style={styles.languageContainer}>
-                <TouchableOpacity 
-                  onPress={() => setLangMenuVisible(v => !v)} 
-                  style={styles.langButton}
-                >
-                  <Ionicons name="globe-outline" size={16} color="#8f5be8" />
-                  <Text style={styles.languageText}>{i18n.language === 'te' ? 'TE' : 'EN'}</Text>
-                </TouchableOpacity>
-                {langMenuVisible && (
-                  <View style={styles.langMenuDropdown}>
-                    <TouchableOpacity
-                      style={[styles.langMenuItem, i18n.language === 'en' && styles.langMenuItemActive]}
-                      onPress={() => { i18n.changeLanguage('en'); setLangMenuVisible(false); }}
-                    >
-                      <Text style={styles.langMenuText}>{t('english')}</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.langMenuItem, i18n.language === 'te' && styles.langMenuItemActive]}
-                      onPress={() => { i18n.changeLanguage('te'); setLangMenuVisible(false); }}
-                    >
-                      <Text style={styles.langMenuText}>{t('telugu')} (Telugu)</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
-              </View>
               <View style={styles.coinBadge}>
                 <MaterialCommunityIcons name="face-man-shimmer" size={16} color="#F53F7A" />
                 <Text style={styles.coinText}>{userData?.coin_balance || 0}</Text>
               </View>
+              {/* Wishlist Heart Icon */}
               <TouchableOpacity style={styles.iconButton} onPress={() => navigation.navigate('Wishlist')}>
-                <Ionicons name="heart-outline" size={22} color="#333" />
-                {wishlist.length > 0 && (
+                <Ionicons name="heart-outline" size={22} color="#F53F7A" />
+                {wishlistUnreadCount > 0 && (
                   <View style={styles.badge}>
-                    <Text style={styles.badgeText}>{wishlist.length}</Text>
+                    <Text style={styles.badgeText}>{wishlistUnreadCount > 99 ? '99+' : wishlistUnreadCount}</Text>
                   </View>
                 )}
               </TouchableOpacity>
@@ -972,7 +1705,7 @@ const Dashboard = () => {
             <Ionicons name="search-outline" size={20} color="#888" />
             <TextInput
               style={styles.searchInput}
-              placeholder={t('search')}
+              placeholder="Search Products"
               placeholderTextColor="#888"
               value={searchText}
               onChangeText={setSearchText}
@@ -981,6 +1714,8 @@ const Dashboard = () => {
           </View>
         </View>
       </SafeAreaView>
+        </Animated.View>
+        {/* End Header Animation */}
 
       {/* Initial Loading Screen */}
       {isInitialLoading && !hasError ? (
@@ -1133,115 +1868,22 @@ const Dashboard = () => {
             />
           }
         >
-        {/* Shop by Category Section */}
-        <View style={styles.sectionContainer}>
-          {categories.length === 0 && !isInitialLoading ? (
-            <View style={styles.emptyContainer}>
-              <Ionicons name="folder-open-outline" size={48} color="#999" />
-              <Text style={styles.emptyText}>{t('no_categories_available')}</Text>
-            </View>
-          ) : (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryScrollView}>
-              {categories.map((category) => (
+        {/* Show search results if user is actively searching */}
+        {isSearching ? (
+          renderSearchResults()
+        ) : (
+          <>
+            {/* Dynamic Sections based on admin panel ordering */}
+            {featureSections.map((section, index) => (
+              <View key={section.id}>
+                {renderSectionByType(section)}
+              </View>
+            ))}
 
-                <TouchableOpacity
-                  key={category.id}
-                  style={styles.categoryCard}
-                  onPress={() => navigation.navigate('Products', { category })}
-                >
-                  {/* <View style={styles.categoryOverlay}> */}
-                  <Image
-                    source={{
-                      uri: category.image_url || 'https://images.unsplash.com/photo-1610030469983-98e550d6193c?w=300&h=200&fit=crop'
-                    }}
-                    style={styles.categoryImage}
-                  />
-                  {/* </View> */}
-                  <Text style={styles.categoryTitle}>{category.name}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          )}
-        </View>
-
-        {/* Pattu Saree Collection */}
-        {/* <View style={styles.sectionContainer}>
-          <Text style={styles.sectionTitle}>{t('pattu_saree_collection') || 'Pattu Saree Collection'}</Text>
-          <View style={styles.noVideosContainer}>
-            <Text style={styles.noVideosText}>{t('videos')}</Text>
-          </View>
-        </View> */}
-
-        {/* Trending Now */}
-        <View style={styles.sectionContainer}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>{t('trending_now') || 'Trending Now'}</Text>
-            <TouchableOpacity
-              style={styles.seeMoreButton}
-              onPress={() => navigation.navigate('Products', {
-                category: {
-                  id: 'trending',
-                  name: 'Trending Products',
-                  description: 'Trending products',
-                  is_active: true,
-                  created_at: new Date().toISOString(),
-                  updated_at: new Date().toISOString()
-                },
-                featuredType: 'trending'
-              })}
-            >
-              <Text style={styles.seeMoreText}>{t('see_more')}</Text>
-              <Ionicons name="chevron-forward" size={16} color="#F53F7A" />
-            </TouchableOpacity>
-          </View>
-          {filteredTrendingProducts.length === 0 ? (
-            <View style={styles.emptyContainer}>
-              <Ionicons name="trending-up-outline" size={48} color="#999" />
-              <Text style={styles.emptyText}>{t('no_trending_products_available')}</Text>
-            </View>
-          ) : (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.productScrollView}>
-              {filteredTrendingProducts.map((product) => renderProductCard(product))}
-            </ScrollView>
-          )}
-        </View>
-
-        {/* Best Sellers */}
-        <View style={[styles.sectionContainer, { marginBottom: Platform.OS === 'android' ? 45 : 0 }]}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>{t('best_sellers') || 'Best Sellers'}</Text>
-            <TouchableOpacity
-              style={styles.seeMoreButton}
-              onPress={() => navigation.navigate('Products', {
-                category: {
-                  id: 'best_sellers',
-                  name: 'Best Sellers',
-                  description: 'Best selling products',
-                  is_active: true,
-                  created_at: new Date().toISOString(),
-                  updated_at: new Date().toISOString()
-                },
-                featuredType: 'best_seller'
-              })}
-            >
-              <Text style={styles.seeMoreText}>{t('see_more')}</Text>
-              <Ionicons name="chevron-forward" size={16} color="#F53F7A" />
-            </TouchableOpacity>
-          </View>
-          {filteredBestSellerProducts.length === 0 ? (
-            <View style={styles.emptyContainer}>
-              <Ionicons name="star-outline" size={48} color="#999" />
-              <Text style={styles.emptyText}>{t('no_best_sellers_available')}</Text>
-            </View>
-          ) : (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.productScrollView}>
-              {filteredBestSellerProducts.map((product) => renderProductCard(product))}
-            </ScrollView>
-          )}
-        </View>
-
-        {/* Category Sections */}
-        {categories.map((category) => renderCategorySection(category))}
+            {/* Category-specific product sections (shown after main sections) */}
+            {categories.map((category) => renderCategorySection(category))}
+          </>
+        )}
 
         {/* Policies Footer */}
         <View style={styles.policiesFooter}>
@@ -1393,6 +2035,8 @@ const Dashboard = () => {
           </BottomSheetScrollView>
         </BottomSheet>
       )}
+      </Animated.View>
+      {/* End Animated Content Wrapper */}
     </View>
   );
 };
@@ -1425,12 +2069,6 @@ const styles = StyleSheet.create({
   logoContainer: {
     gap: 4,
   },
-  logo: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: '#1a1a1a',
-    letterSpacing: -0.5,
-  },
   locationRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1447,36 +2085,27 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   languageContainer: {
+    marginRight: 16,
     position: 'relative',
-  },
-  langButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    backgroundColor: '#f8f8f8',
-    borderRadius: 8,
   },
   languageText: {
     fontSize: 12,
-    color: '#2d334d',
     fontWeight: '700',
+    color: '#1C1C1E',
   },
   langMenuDropdown: {
     position: 'absolute',
-    top: 38,
+    top: 32,
     right: 0,
-    backgroundColor: '#fff',
+    backgroundColor: '#f7f8fa',
     borderRadius: 12,
     shadowColor: '#000',
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.08,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 2 },
-    elevation: 6,
+    elevation: 4,
     minWidth: 120,
-    zIndex: 1001,
-    overflow: 'hidden',
+    zIndex: 100,
   },
   langMenuItem: {
     padding: 12,
@@ -1486,7 +2115,7 @@ const styles = StyleSheet.create({
   },
   langMenuText: {
     color: '#222',
-    fontSize: 14,
+    fontSize: 16,
   },
   coinBadge: {
     flexDirection: 'row',
@@ -2329,6 +2958,192 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: '#f0f0f0',
     marginVertical: 16,
+  },
+  // Search Results Styles
+  searchResultsContainer: {
+    flex: 1,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+  },
+  searchResultsHeader: {
+    marginBottom: 16,
+  },
+  searchResultsTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+  },
+  searchResultsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  searchResultCard: {
+    width: '48%',
+    marginBottom: 16,
+  },
+  noResultsContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 80,
+  },
+  noResultsTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#666',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  noResultsText: {
+    fontSize: 14,
+    color: '#999',
+    textAlign: 'center',
+    paddingHorizontal: 40,
+  },
+  // Welcome Animation Styles
+  welcomeOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: '#fff',
+    zIndex: 10000,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  welcomeContent: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  floatingElement: {
+    position: 'absolute',
+  },
+  floatingShape: {
+    shadowColor: '#F53F7A',
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 5,
+  },
+  welcomeMessageContainer: {
+    alignItems: 'center',
+    marginTop: 20,
+  },
+  logoCircle: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: '#FF3F6C',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 24,
+    shadowColor: '#FF3F6C',
+    shadowOpacity: 0.4,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 10,
+  },
+  logoText: {
+    fontSize: 36,
+    fontWeight: '900',
+    color: '#fff',
+    letterSpacing: -1,
+  },
+  logoSubText: {
+    fontSize: 32,
+    fontWeight: '800',
+    color: '#FFE5EC',
+  },
+  welcomeTitle: {
+    fontSize: 28,
+    fontWeight: '800',
+    color: '#1C1C1E',
+    marginBottom: 8,
+    letterSpacing: -0.5,
+  },
+  welcomeSubtitle: {
+    fontSize: 14,
+    color: '#6B7280',
+    fontWeight: '500',
+    textAlign: 'center',
+    marginHorizontal: 4,
+  },
+  contentWrapper: {
+    flex: 1,
+  },
+  // Enhanced Premium Styles
+  particlesContainer: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 1,
+  },
+  particle: {
+    position: 'absolute',
+    backgroundColor: '#FF3F6C',
+    borderRadius: 50,
+  },
+  starShape: {
+    borderRadius: 0,
+  },
+  rippleCircle: {
+    position: 'absolute',
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    borderWidth: 3,
+    borderColor: '#FF3F6C',
+    backgroundColor: 'transparent',
+  },
+  logoGradient: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  shimmerOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: -50,
+    width: 200,
+    height: 120,
+    overflow: 'hidden',
+    borderRadius: 60,
+  },
+  textContainer: {
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  welcomeTitleGradient: {
+    fontSize: 26,
+    fontWeight: '700',
+    color: '#1C1C1E',
+  },
+  welcomeTitleBrand: {
+    fontSize: 28,
+    fontWeight: '900',
+    color: '#FF3F6C',
+    letterSpacing: -0.5,
+  },
+  subtitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 12,
+    paddingHorizontal: 20,
+  },
+  dotsContainer: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 24,
+    alignItems: 'center',
+  },
+  decorativeDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
 });
 

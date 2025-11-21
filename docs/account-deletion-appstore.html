@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Account Deletion - Only2U</title>
+    <meta name="description" content="Request deletion of your Only2U account and understand what data is removed">
+    <meta name="robots" content="noindex, nofollow">
+    <meta name="theme-color" content="#F53F7A">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #DC2626 0%, #F44336 100%);
+            color: white;
+            padding: 40px 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 32px;
+            font-weight: 700;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            font-size: 16px;
+            opacity: 0.95;
+        }
+
+        .content {
+            padding: 40px 30px;
+        }
+
+        h2 {
+            color: #F53F7A;
+            font-size: 24px;
+            margin-top: 30px;
+            margin-bottom: 15px;
+            font-weight: 600;
+        }
+
+        h3 {
+            color: #333;
+            font-size: 18px;
+            margin-top: 20px;
+            margin-bottom: 10px;
+            font-weight: 600;
+        }
+
+        p {
+            margin-bottom: 15px;
+            color: #555;
+        }
+
+        ul, ol {
+            margin-left: 30px;
+            margin-bottom: 15px;
+        }
+
+        li {
+            margin-bottom: 10px;
+            color: #555;
+        }
+
+        .info-box {
+            background: #E3F2FD;
+            padding: 20px;
+            border-left: 4px solid #2196F3;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+
+        .warning-box {
+            background: #FFF3E0;
+            padding: 20px;
+            border-left: 4px solid #FF9800;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+
+        .danger-box {
+            background: #FFEBEE;
+            padding: 20px;
+            border-left: 4px solid #F44336;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+
+        .success-box {
+            background: #E8F5E9;
+            padding: 20px;
+            border-left: 4px solid #4CAF50;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+
+        .steps {
+            background: #f8f9fa;
+            padding: 25px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+
+        .step {
+            display: flex;
+            align-items: flex-start;
+            margin-bottom: 20px;
+        }
+
+        .step-number {
+            background: #F53F7A;
+            color: white;
+            width: 35px;
+            height: 35px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 18px;
+            margin-right: 15px;
+            flex-shrink: 0;
+        }
+
+        .step-content {
+            flex: 1;
+        }
+
+        .step-content strong {
+            color: #F53F7A;
+            font-size: 16px;
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        .timeline {
+            position: relative;
+            padding-left: 40px;
+            margin: 20px 0;
+        }
+
+        .timeline::before {
+            content: '';
+            position: absolute;
+            left: 15px;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background: #DC2626;
+        }
+
+        .timeline-item {
+            position: relative;
+            margin-bottom: 25px;
+        }
+
+        .timeline-item::before {
+            content: '';
+            position: absolute;
+            left: -32px;
+            top: 5px;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #DC2626;
+            border: 3px solid white;
+            box-shadow: 0 0 0 2px #DC2626;
+        }
+
+        .timeline-item strong {
+            color: #DC2626;
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        .footer {
+            background: #f8f9fa;
+            padding: 30px;
+            text-align: center;
+            border-top: 1px solid #e9ecef;
+        }
+
+        .footer p {
+            color: #6c757d;
+            font-size: 14px;
+            margin-bottom: 15px;
+        }
+
+        .btn-footer {
+            display: inline-block;
+            padding: 12px 30px;
+            margin: 10px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+
+        .btn-danger {
+            background: #DC2626;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #B91C1C;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3);
+        }
+
+        .btn-secondary-footer {
+            background: white;
+            color: #F53F7A;
+            border: 2px solid #F53F7A;
+        }
+
+        .btn-secondary-footer:hover {
+            background: #FFF5F8;
+        }
+
+        a {
+            color: #F53F7A;
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 24px;
+            }
+
+            .content {
+                padding: 30px 20px;
+            }
+
+            h2 {
+                font-size: 20px;
+            }
+
+            .step {
+                flex-direction: column;
+            }
+
+            .step-number {
+                margin-bottom: 10px;
+            }
+
+            .timeline {
+                padding-left: 30px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🗑️ Account Deletion Request</h1>
+            <p>Permanently delete your Only2U account and associated data</p>
+        </div>
+
+        <div class="content">
+            <p>
+                We're sorry to see you go! This page explains how to delete your Only2U account, what data will be removed, 
+                and what information may be retained for legal compliance.
+            </p>
+
+            <div class="danger-box">
+                <h3>⚠️ Important: This Action is Permanent</h3>
+                <p>
+                    Account deletion is <strong>irreversible</strong>. Once deleted, you cannot:
+                </p>
+                <ul>
+                    <li>Recover your account, order history, or saved data</li>
+                    <li>Access your coin balance or rewards</li>
+                    <li>Restore your collections, wishlists, or reviews</li>
+                    <li>Retrieve AI-generated content (face swaps, virtual try-ons)</li>
+                </ul>
+            </div>
+
+            <h2>🔄 How to Delete Your Account</h2>
+
+            <div class="steps">
+                <h3 style="color: #F53F7A; margin-bottom: 20px;">Method 1: In-App Deletion (Recommended)</h3>
+                
+                <div class="step">
+                    <div class="step-number">1</div>
+                    <div class="step-content">
+                        <strong>Open the Only2U App</strong>
+                        <p>Launch the app and ensure you're logged in to your account</p>
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div class="step-number">2</div>
+                    <div class="step-content">
+                        <strong>Navigate to Profile</strong>
+                        <p>Tap the Profile icon in the bottom navigation bar</p>
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div class="step-number">3</div>
+                    <div class="step-content">
+                        <strong>Access Settings</strong>
+                        <p>Tap the gear icon (⚙️) in the top right corner to open Settings</p>
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div class="step-number">4</div>
+                    <div class="step-content">
+                        <strong>Privacy & Security</strong>
+                        <p>Go to the "Privacy & Security" section in Settings</p>
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div class="step-number">5</div>
+                    <div class="step-content">
+                        <strong>Delete Account</strong>
+                        <p>Scroll down and tap the "Delete Account" button</p>
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div class="step-number">6</div>
+                    <div class="step-content">
+                        <strong>Verify Identity</strong>
+                        <p>Enter your password or verify via OTP sent to your phone</p>
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div class="step-number">7</div>
+                    <div class="step-content">
+                        <strong>Confirm Deletion</strong>
+                        <p>Review what will be deleted and tap "Confirm" to proceed</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="steps">
+                <h3 style="color: #F53F7A; margin-bottom: 20px;">Method 2: Email Request</h3>
+                <p>If you cannot access the app, send an email request:</p>
+                
+                <div class="step">
+                    <div class="step-number">✉️</div>
+                    <div class="step-content">
+                        <strong>Send Email To:</strong>
+                        <p>support@only2u.com</p>
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div class="step-number">📝</div>
+                    <div class="step-content">
+                        <strong>Subject Line:</strong>
+                        <p>"Account Deletion Request - Only2U"</p>
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div class="step-number">📋</div>
+                    <div class="step-content">
+                        <strong>Include in Email:</strong>
+                        <ul>
+                            <li>Registered email address</li>
+                            <li>Phone number used for login/OTP</li>
+                            <li>Full name on account</li>
+                            <li>Reason for deletion (optional)</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <h2>⏱️ Deletion Timeline</h2>
+            
+            <div class="timeline">
+                <div class="timeline-item">
+                    <strong>Immediate (0 hours)</strong>
+                    <p>Account is deactivated - you cannot log in or access the app</p>
+                </div>
+
+                <div class="timeline-item">
+                    <strong>Within 48 hours</strong>
+                    <p>Deletion request is verified and processing begins</p>
+                </div>
+
+                <div class="timeline-item">
+                    <strong>7 days</strong>
+                    <p>Personal data removed from active production databases</p>
+                </div>
+
+                <div class="timeline-item">
+                    <strong>30 days</strong>
+                    <p>Complete deletion from all systems and services</p>
+                </div>
+
+                <div class="timeline-item">
+                    <strong>90 days</strong>
+                    <p>Removed from backups and archived data</p>
+                </div>
+            </div>
+
+            <div class="info-box">
+                <h3>🔙 Cancellation Period (Grace Period)</h3>
+                <p>
+                    You have <strong>7 days</strong> to cancel your deletion request. To cancel, email 
+                    <strong>support@only2u.com</strong> with subject "Cancel Account Deletion Request" 
+                    within 7 days.
+                </p>
+                <p style="margin-top: 10px;">
+                    After 7 days, the deletion becomes <strong>permanent and irreversible</strong>.
+                </p>
+            </div>
+
+            <h2>✅ What Gets Deleted</h2>
+            
+            <div class="success-box">
+                <h3>Permanently Removed Data:</h3>
+                <ul>
+                    <li><strong>Account Information:</strong> Name, email, phone number, password</li>
+                    <li><strong>Profile Data:</strong> Profile photo, bio, preferences, settings</li>
+                    <li><strong>Body Measurements:</strong> Skin tone selection, body width, size preferences</li>
+                    <li><strong>Addresses:</strong> All saved shipping and billing addresses</li>
+                    <li><strong>Payment Methods:</strong> Saved payment information</li>
+                    <li><strong>Collections:</strong> All collections and product lists</li>
+                    <li><strong>Wishlist:</strong> All wishlisted products</li>
+                    <li><strong>AI Content:</strong> Face swap images/videos, virtual try-on results</li>
+                    <li><strong>Reviews & Ratings:</strong> Your reviews (anonymized, not deleted)</li>
+                    <li><strong>Comments:</strong> Product comments and discussions</li>
+                    <li><strong>Notifications:</strong> Push tokens and notification preferences</li>
+                    <li><strong>Coins & Rewards:</strong> Coin balance and referral earnings (forfeited)</li>
+                    <li><strong>Cart:</strong> Shopping cart items</li>
+                    <li><strong>Blocked Users:</strong> Your block list</li>
+                    <li><strong>Login Sessions:</strong> All active sessions across devices</li>
+                </ul>
+            </div>
+
+            <div class="warning-box">
+                <h3>📋 What May Be Retained (Anonymized)</h3>
+                <p>For legal, tax, and accounting compliance, we may retain:</p>
+                <ul>
+                    <li><strong>Order History:</strong> Transaction records (anonymized) for up to 7 years</li>
+                    <li><strong>Payment Records:</strong> Transaction IDs and amounts (no personal details)</li>
+                    <li><strong>Invoices:</strong> For tax compliance (personal info removed)</li>
+                    <li><strong>Refund Records:</strong> For dispute resolution (anonymized)</li>
+                    <li><strong>Vendor Transactions:</strong> If you're a vendor/reseller (anonymized)</li>
+                </ul>
+                <p style="margin-top: 15px;">
+                    <em><strong>Note:</strong> All retained data is fully anonymized and cannot be linked back to you. 
+                    It's shown as "Deleted User [ID]" in our systems.</em>
+                </p>
+            </div>
+
+            <h2>📝 Before You Delete - Important Checklist</h2>
+            
+            <div class="info-box">
+                <h3>Please Complete These Actions First:</h3>
+                <ul>
+                    <li>✓ <strong>Download Your Data:</strong> Request a data export (email privacy@only2u.com)</li>
+                    <li>✓ <strong>Complete Pending Orders:</strong> Wait for orders to be delivered or cancel them</li>
+                    <li>✓ <strong>Use Coin Balance:</strong> Spend coins (cannot be refunded or recovered)</li>
+                    <li>✓ <strong>Save Important Information:</strong> Download order invoices, receipts</li>
+                    <li>✓ <strong>Backup Collections:</strong> Screenshot or export your favorite products</li>
+                    <li>✓ <strong>Withdraw Earnings:</strong> If vendor/reseller, withdraw pending payments</li>
+                    <li>✓ <strong>Cancel Subscriptions:</strong> If any premium features are active</li>
+                </ul>
+            </div>
+
+            <h2>🏪 Vendor & Reseller Accounts</h2>
+            <div class="warning-box">
+                <h3>Additional Steps for Business Accounts:</h3>
+                <ul>
+                    <li><strong>Fulfill Pending Orders:</strong> Complete all customer orders</li>
+                    <li><strong>Withdraw Earnings:</strong> Request payout of pending commission</li>
+                    <li><strong>Product Listings:</strong> Will be permanently removed</li>
+                    <li><strong>Sales Data:</strong> Anonymized and retained for accounting (7 years)</li>
+                    <li><strong>Tax Documents:</strong> Download before deletion</li>
+                    <li><strong>Customer Data:</strong> Order details remain but vendor info is anonymized</li>
+                </ul>
+            </div>
+
+            <h2>❓ Frequently Asked Questions</h2>
+
+            <h3>Can I reactivate my account after deletion?</h3>
+            <p>
+                <strong>No.</strong> Account deletion is permanent. You'll need to create a new account with a different 
+                email address. The same phone number can be used after 30 days.
+            </p>
+
+            <h3>What happens to my pending orders?</h3>
+            <p>
+                You must wait for all pending orders to be completed or cancel them before deletion. 
+                Orders in transit cannot be deleted until delivered or returned.
+            </p>
+
+            <h3>Will my reviews be deleted?</h3>
+            <p>
+                Reviews will be <strong>anonymized</strong> (shown as "Anonymous User") rather than deleted to 
+                maintain product rating integrity. Your identity is removed but the review content remains.
+            </p>
+
+            <h3>Can I recover my coin balance?</h3>
+            <p>
+                <strong>No.</strong> Coin balances cannot be converted to money or refunded. Please spend your coins 
+                before requesting deletion.
+            </p>
+
+            <h3>What if I change my mind?</h3>
+            <p>
+                You have <strong>7 days</strong> to cancel your deletion request by emailing support@only2u.com with 
+                subject "Cancel Account Deletion Request". After 7 days, deletion is irreversible.
+            </p>
+
+            <h3>How long does complete deletion take?</h3>
+            <p>
+                <strong>Immediate:</strong> Account deactivation<br>
+                <strong>7 days:</strong> Active data removal<br>
+                <strong>30 days:</strong> Complete system deletion<br>
+                <strong>90 days:</strong> Backup deletion
+            </p>
+
+            <h3>What if I can't access the app?</h3>
+            <p>
+                Send an email to support@only2u.com with your registered email and phone number. 
+                We'll verify your identity and process the deletion manually.
+            </p>
+
+            <h3>Will vendors I bought from still have my information?</h3>
+            <p>
+                Vendors' copies of fulfilled orders may be retained per their own policies, but Only2U will anonymize 
+                your information in our systems.
+            </p>
+
+            <h2>📞 Contact & Support</h2>
+            
+            <div class="success-box">
+                <h3>Get Help With Account Deletion</h3>
+                
+                <p><strong>Email Support:</strong></p>
+                <p>
+                    <a href="mailto:support@only2u.com?subject=Account%20Deletion%20Request">support@only2u.com</a>
+                </p>
+                <p style="font-size: 14px; margin-top: 5px;">Subject: "Account Deletion Request"</p>
+                
+                <p style="margin-top: 20px;"><strong>Privacy & Data Requests:</strong></p>
+                <p>
+                    <a href="mailto:privacy@only2u.com?subject=Data%20Privacy%20Request">privacy@only2u.com</a>
+                </p>
+                <p style="font-size: 14px; margin-top: 5px;">For data exports and privacy inquiries</p>
+                
+                <p style="margin-top: 20px;"><strong>Response Time:</strong></p>
+                <p>We process deletion requests within <strong>48 hours</strong></p>
+                
+                <p style="margin-top: 20px;"><strong>Verification Required:</strong></p>
+                <p>Include your registered email and phone number for identity verification</p>
+            </div>
+
+            <h2>🔐 Your Rights</h2>
+
+            <h3>GDPR (European Users)</h3>
+            <p>Under GDPR, you have the "right to erasure" (right to be forgotten). We comply with:</p>
+            <ul>
+                <li>Complete deletion of personal data</li>
+                <li>Notification of data processors</li>
+                <li>Confirmation of deletion</li>
+                <li>Compliance within 30 days</li>
+            </ul>
+
+            <h3>CCPA (California Users)</h3>
+            <p>Under CCPA, you have the right to:</p>
+            <ul>
+                <li>Request deletion of personal information</li>
+                <li>Receive confirmation of deletion</li>
+                <li>No discrimination for exercising rights</li>
+            </ul>
+
+            <h2>📊 Data Retention After Deletion</h2>
+            <div class="info-box">
+                <table style="width: 100%; border-collapse: collapse;">
+                    <tr style="border-bottom: 1px solid #ddd;">
+                        <td style="padding: 10px; font-weight: 600;">Data Type</td>
+                        <td style="padding: 10px; font-weight: 600;">Retention Period</td>
+                    </tr>
+                    <tr style="border-bottom: 1px solid #eee;">
+                        <td style="padding: 10px;">Personal Information</td>
+                        <td style="padding: 10px;"><strong>Deleted immediately</strong></td>
+                    </tr>
+                    <tr style="border-bottom: 1px solid #eee;">
+                        <td style="padding: 10px;">Profile & Preferences</td>
+                        <td style="padding: 10px;"><strong>Deleted in 7 days</strong></td>
+                    </tr>
+                    <tr style="border-bottom: 1px solid #eee;">
+                        <td style="padding: 10px;">Collections & Wishlists</td>
+                        <td style="padding: 10px;"><strong>Deleted in 7 days</strong></td>
+                    </tr>
+                    <tr style="border-bottom: 1px solid #eee;">
+                        <td style="padding: 10px;">AI-Generated Content</td>
+                        <td style="padding: 10px;"><strong>Deleted in 30 days</strong></td>
+                    </tr>
+                    <tr style="border-bottom: 1px solid #eee;">
+                        <td style="padding: 10px;">Order Records (Anonymized)</td>
+                        <td style="padding: 10px;"><strong>7 years (legal requirement)</strong></td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 10px;">Backups</td>
+                        <td style="padding: 10px;"><strong>90 days</strong></td>
+                    </tr>
+                </table>
+            </div>
+
+            <h2>🛡️ Data Security During Deletion</h2>
+            <p>Throughout the deletion process:</p>
+            <ul>
+                <li>Your data remains encrypted and secure</li>
+                <li>Access is immediately revoked</li>
+                <li>Deletion is logged and audited</li>
+                <li>You receive confirmation at each stage</li>
+                <li>Compliance with GDPR, CCPA, and other regulations</li>
+            </ul>
+
+            <h2>💡 Alternatives to Deletion</h2>
+            <p>Not ready for permanent deletion? Consider these options:</p>
+            <ul>
+                <li><strong>Disable Notifications:</strong> Turn off all app notifications</li>
+                <li><strong>Clear Collections:</strong> Remove saved items without deleting account</li>
+                <li><strong>Update Privacy Settings:</strong> Limit data sharing and visibility</li>
+                <li><strong>Block Users/Vendors:</strong> Block specific users instead of leaving</li>
+                <li><strong>Contact Support:</strong> Discuss concerns - we may be able to help</li>
+            </ul>
+
+            <div class="warning-box">
+                <h3>⚡ Quick Facts</h3>
+                <ul>
+                    <li>Deletion request processing: <strong>48 hours</strong></li>
+                    <li>Grace period to cancel: <strong>7 days</strong></li>
+                    <li>Complete data removal: <strong>30 days</strong></li>
+                    <li>Backup deletion: <strong>90 days</strong></li>
+                    <li>Legal record retention: <strong>Up to 7 years (anonymized)</strong></li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p>&copy; 2025 Only2U Fashion Private Limited. All rights reserved.</p>
+            <p>We respect your privacy and your right to delete your data.</p>
+            
+            <a href="mailto:support@only2u.com?subject=Account%20Deletion%20Request%20-%20Only2U&body=I%20would%20like%20to%20request%20the%20deletion%20of%20my%20Only2U%20account.%0A%0ARegistered%20Email%3A%20%0APhone%20Number%3A%20%0AFull%20Name%3A%20%0AReason%20(optional)%3A%20" 
+               class="btn-footer btn-danger">
+                📧 Request Account Deletion via Email
+            </a>
+            
+            <a href="privacy-policy.html" class="btn-footer btn-secondary-footer">
+                📄 Privacy Policy
+            </a>
+            
+            <p style="margin-top: 25px; font-size: 12px; color: #999;">
+                Last Updated: January 20, 2025<br>
+                For questions: privacy@only2u.com | support@only2u.com
+            </p>
+        </div>
+    </div>
+
+    <script>
+        // Optional: Track deletion page visits (privacy-compliant)
+        console.log('Account deletion page loaded');
+    </script>
+</body>
+</html>
+

@@ -15,6 +15,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import { supabase } from '../utils/supabase';
+import { Only2ULogo } from '../components/common';
 import { uploadProfilePhoto, validateImage } from '../utils/profilePhotoUpload';
 import Toast from 'react-native-toast-message';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -211,7 +212,7 @@ const ProfilePictureUpload = () => {
             <Ionicons name="arrow-back" size={24} color="#fff" />
           </TouchableOpacity>
           <View style={styles.logoContainer}>
-            <Text style={styles.logoText}>Only<Text style={{ color: '#F53F7A' }}>2</Text>U</Text>
+            <Only2ULogo size="large" />
           </View>
         </View>
 

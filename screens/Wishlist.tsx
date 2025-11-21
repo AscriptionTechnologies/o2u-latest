@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, FlatList, Dimensions, ActivityIndicator, Share, Linking, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, FlatList, Dimensions, ActivityIndicator, Linking, Alert, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -11,7 +11,6 @@ import { useUser } from '~/contexts/UserContext';
 import { useTranslation } from 'react-i18next';
 import { getFirstSafeImageUrl, getProductImages, getFirstSafeProductImage, preferApiRenderedImageFirst, getSafeImageUrl } from '../utils/imageUtils';
 import Toast from 'react-native-toast-message';
-import { Clipboard } from 'react-native';
 
 const { width } = Dimensions.get('window');
 
@@ -28,7 +27,7 @@ interface Collection {
 const Wishlist = () => {
   const navigation = useNavigation();
   const route = useRoute();
-  const { wishlist, removeFromWishlist } = useWishlist();
+  const { wishlist, removeFromWishlist, clearWishlist, markAllAsRead: markWishlistAsRead, unreadCount: wishlistUnreadCount } = useWishlist();
   const { previewProducts, removeFromPreview } = usePreview();
   const { notifications, removeNotification, markAllRead } = useNotifications();
   const { userData } = useUser();
@@ -42,6 +41,9 @@ const Wishlist = () => {
   const [productCollections, setProductCollections] = React.useState<{ [productId: string]: string }>({});
   const [collections, setCollections] = React.useState<Collection[]>([]);
   const [loadingCollections, setLoadingCollections] = React.useState(false);
+  const [showRemoveModal, setShowRemoveModal] = React.useState(false);
+  const [itemToRemove, setItemToRemove] = React.useState<any>(null);
+  const [refreshKey, setRefreshKey] = React.useState(0); // Force refresh trigger
 
   // Handle route param changes
   React.useEffect(() => {
@@ -124,7 +126,14 @@ const Wishlist = () => {
           })
         );
 
-        setCollections(collectionsWithCovers);
+        // Sort collections to put "All" at the top
+        const sortedCollections = collectionsWithCovers.sort((a, b) => {
+          if (a.name === 'All') return -1;
+          if (b.name === 'All') return 1;
+          return 0;
+        });
+        
+        setCollections(sortedCollections);
 
         // Also build the product -> collection map for individual products view
         const { data: collectionProducts, error } = await supabase
@@ -148,92 +157,41 @@ const Wishlist = () => {
     fetchCollectionsWithCovers();
   }, [userData?.id, wishlist]);
 
-  // Real counts for badges
-  // Filter out personalized items AND items that are in any collection
-  const regularWishlistItems = wishlist.filter(item => 
-    !item.isPersonalized && !productCollections[item.id]
+  // Real counts for badges - use unread counts from contexts
+  const regularWishlistItems = React.useMemo(() => 
+    wishlist.filter(item => 
+      !item.isPersonalized && !productCollections[item.id]
+    ), [wishlist, productCollections, refreshKey]
   );
-  const wishlistCount = regularWishlistItems.length;
-  const previewCount = previewProducts.length;
-  const notificationsCount = notifications.filter(n => n.unread).length;
+  
+  // Use unreadCount from context instead of total item count
+  const notificationsCount = React.useMemo(() => 
+    notifications.filter(n => n.unread).length,
+    [notifications, refreshKey]
+  );
 
-  const TABS = [
+  const TABS = React.useMemo(() => [
     { key: 'notifications', label: 'notifications', icon: 'notifications-outline', badge: notificationsCount },
-    { key: 'wishlist', label: 'wishlist', icon: 'heart-outline', badge: wishlistCount },
-    { key: 'preview', label: 'your_preview', icon: 'person-outline', badge: previewCount },
-  ];
+    { key: 'wishlist', label: 'wishlist', icon: 'heart-outline', badge: wishlistUnreadCount },
+    { key: 'preview', label: 'your_preview', icon: 'person-outline', badge: 0 }, // Preview has no unread concept
+  ], [notificationsCount, wishlistUnreadCount, refreshKey]);
 
   // Handle collection sharing
   const handleShareCollection = async (collection: Collection) => {
     try {
-      // Enable sharing and get/create share token
-      const { data: shareData, error: shareError } = await supabase
-        .rpc('enable_collection_sharing', { collection_uuid: collection.id });
+      const collectionUrl = `https://only2u.app/collection/${collection.id}`;
+      const message = `Check out my ${collection.name} collection on Only2U! 🛍️\n\n${collection.item_count} amazing products curated just for you.\n\n${collectionUrl}`;
+      const whatsappUrl = `whatsapp://send?text=${encodeURIComponent(message)}`;
 
-      if (shareError) {
-        console.error('Error enabling sharing:', shareError);
-        Toast.show({
-          type: 'error',
-          text1: 'Sharing Failed',
-          text2: 'Could not generate share link',
-        });
-        return;
+      const canOpen = await Linking.canOpenURL(whatsappUrl);
+      if (canOpen) {
+        await Linking.openURL(whatsappUrl);
+      } else {
+        Alert.alert('WhatsApp not installed', 'Please install WhatsApp to share this collection.');
       }
-
-      const shareToken = shareData;
-      const shareUrl = `only2u://shared-collection/${shareToken}`;
-      const shareMessage = `Check out my collection "${collection.name}" with ${collection.item_count} items on Only2U!\n\n${shareUrl}`;
-
-      // Show share options
-      Alert.alert(
-        'Share Collection',
-        'Choose how to share this collection',
-        [
-          {
-            text: 'WhatsApp',
-            onPress: async () => {
-              const whatsappUrl = `whatsapp://send?text=${encodeURIComponent(shareMessage)}`;
-              const canOpen = await Linking.canOpenURL(whatsappUrl);
-              if (canOpen) {
-                await Linking.openURL(whatsappUrl);
-                // Increment share count
-                await supabase
-                  .from('collections')
-                  .update({ share_count: collection.item_count + 1 })
-                  .eq('id', collection.id);
-              } else {
-                Toast.show({
-                  type: 'error',
-                  text1: 'WhatsApp not installed',
-                  text2: 'Please install WhatsApp to share',
-                });
-              }
-            },
-          },
-          {
-            text: 'Copy Link',
-            onPress: () => {
-              Clipboard.setString(shareUrl);
-              Toast.show({
-                type: 'success',
-                text1: 'Link Copied!',
-                text2: 'Share link copied to clipboard',
-              });
-            },
-          },
-          {
-            text: 'Cancel',
-            style: 'cancel',
-          },
-        ]
-      );
     } catch (error) {
       console.error('Error sharing collection:', error);
-      Toast.show({
-        type: 'error',
-        text1: 'Error',
-        text2: 'Failed to share collection',
-      });
+      Alert.alert('Error', 'Unable to share this collection right now.');
     }
   };
 
@@ -301,20 +259,13 @@ const Wishlist = () => {
               ))}
             </View>
           )}
-          
-          {/* Private Lock Icon */}
-          {item.is_private && (
-            <View style={styles.privateBadge}>
-              <Ionicons name="lock-closed" size={12} color="#fff" />
-            </View>
-          )}
         </View>
 
         {/* Folder Info */}
         <View style={styles.folderInfo}>
           <View style={styles.folderInfoRow}>
             <View style={styles.folderTextContainer}>
-              <Text style={styles.folderName} numberOfLines={1}>
+              <Text style={styles.folderName} numberOfLines={2}>
                 {item.name}
               </Text>
               <Text style={styles.folderCount}>
@@ -363,14 +314,9 @@ const Wishlist = () => {
         <Image source={{ uri: getFirstSafeProductImage(item) }} style={styles.productImage} />
         <TouchableOpacity 
           style={styles.wishlistButton}
-          onPress={async () => {
-            removeFromWishlist(item.id);
-            if (userData?.id) {
-              await supabase
-                .from('collection_products')
-                .delete()
-                .match({ product_id: item.id });
-            }
+          onPress={() => {
+            setItemToRemove(item);
+            setShowRemoveModal(true);
           }}
         >
           <Ionicons name="heart" size={20} color="#F53F7A" />
@@ -401,26 +347,108 @@ const Wishlist = () => {
     </TouchableOpacity>
   );
 
-  const renderNotificationsItem = ({ item }: any) => (
-    <View style={styles.notificationCard}>
-      {item.image ? (
-        <Image source={{ uri: item.image }} style={styles.notificationImage} />
-      ) : (
-        <View style={[styles.notificationImage, { backgroundColor: '#eee' }]} />
-      )}
-      <View style={styles.notificationContent}>
-        <Text style={styles.notificationTitle} numberOfLines={2}>{item.title}</Text>
-        {!!item.subtitle && (
-          <Text style={styles.notificationSubtitle} numberOfLines={2}>{item.subtitle}</Text>
+  const renderNotificationsItem = ({ item }: any) => {
+    const handleNotificationPress = async () => {
+      // If this is a face swap notification with productId and resultImages, navigate to preview
+      if (item.productId && item.resultImages) {
+        // Find the preview item matching this productId
+        let previewItem = previewProducts.find((p: any) => 
+          p.originalProductId === item.productId || p.id.includes(item.productId)
+        );
+
+        // If preview item not found, fetch product details and create it
+        if (!previewItem) {
+          try {
+            const { data: productData, error } = await supabase
+              .from('products')
+              .select(`
+                id,
+                name,
+                image_urls,
+                video_urls
+              `)
+              .eq('id', item.productId)
+              .single();
+
+            if (!error && productData) {
+              previewItem = {
+                id: `personalized_${item.productId}_${Date.now()}`,
+                name: productData.name || 'Personalized Product',
+                description: `Personalized ${productData.name || 'Product'} with your face`,
+                price: 0,
+                image_urls: item.resultImages,
+                video_urls: [],
+                featured_type: 'personalized',
+                category: { name: 'Personalized' },
+                stock_quantity: 1,
+                variants: [],
+                isPersonalized: true,
+                originalProductImage: productData.image_urls?.[0] || item.image,
+                faceSwapDate: item.timeIso,
+                originalProductId: item.productId,
+              };
+            }
+          } catch (error) {
+            console.error('Error fetching product details:', error);
+          }
+        }
+
+        if (previewItem) {
+          // Navigate to PersonalizedProductResult screen
+          (navigation as any).navigate('PersonalizedProductResult', { 
+            product: {
+              id: previewItem.id,
+              name: previewItem.name,
+              description: previewItem.description,
+              image_urls: item.resultImages || previewItem.image_urls,
+              video_urls: previewItem.video_urls || [],
+              faceSwapDate: previewItem.faceSwapDate || item.timeIso,
+              originalProductId: item.productId,
+              isVideoPreview: previewItem.isVideoPreview,
+              originalProductImage: previewItem.originalProductImage || item.image,
+            }
+          });
+          
+          // Mark notification as read
+          markAllRead();
+        } else {
+          // If preview item still not found, switch to preview tab
+          setActiveTab('preview');
+          markAllRead();
+          Toast.show({
+            type: 'info',
+            text1: 'Face Swap Result',
+            text2: 'Tap on the preview to view your result',
+          });
+        }
+      }
+    };
+
+    return (
+      <TouchableOpacity 
+        style={styles.notificationCard}
+        onPress={handleNotificationPress}
+        activeOpacity={item.productId ? 0.7 : 1}
+      >
+        {item.image ? (
+          <Image source={{ uri: item.image }} style={styles.notificationImage} />
+        ) : (
+          <View style={[styles.notificationImage, { backgroundColor: '#eee' }]} />
         )}
-        <Text style={styles.notificationTime}>{new Date(item.timeIso).toLocaleString()}</Text>
-      </View>
-      <TouchableOpacity style={styles.notificationDelete} onPress={() => removeNotification(item.id)}>
-        <Ionicons name="trash-outline" size={20} color="#888" />
+        <View style={styles.notificationContent}>
+          <Text style={styles.notificationTitle} numberOfLines={2}>{item.title}</Text>
+          {!!item.subtitle && (
+            <Text style={styles.notificationSubtitle} numberOfLines={2}>{item.subtitle}</Text>
+          )}
+          <Text style={styles.notificationTime}>{new Date(item.timeIso).toLocaleString()}</Text>
+        </View>
+        <TouchableOpacity style={styles.notificationDelete} onPress={() => removeNotification(item.id)}>
+          <Ionicons name="trash-outline" size={20} color="#888" />
+        </TouchableOpacity>
+        {item.unread && <View style={styles.unreadDot} />}
       </TouchableOpacity>
-      {item.unread && <View style={styles.unreadDot} />}
-    </View>
-  );
+    );
+  };
 
   const renderPreviewItem = ({ item }: any) => {
     const isVideo = item.video_urls && item.video_urls.length > 0;
@@ -475,13 +503,33 @@ const Wishlist = () => {
         <View style={styles.previewContent}>
           <Text style={styles.previewTitle} numberOfLines={2}>{item.name}</Text>
           <Text style={styles.previewSubtitle} numberOfLines={2}>{item.description}</Text>
-          <Text style={styles.previewTime}>
-            {item.faceSwapDate ? 
-              `Personalized ${new Date(item.faceSwapDate).toLocaleDateString()}` : 
-              'Previewed 2 hours ago'
-            }
-            {isVideoPreview && " • Video Preview"}
-          </Text>
+          <View style={styles.previewMetaRow}>
+            <View style={styles.previewBadge}>
+              <Ionicons name="sparkles" size={12} color="#F53F7A" />
+              <Text style={styles.previewBadgeText}>Personalized</Text>
+            </View>
+            <Text style={styles.previewTimestamp}>
+              {item.faceSwapDate ? 
+                new Date(item.faceSwapDate).toLocaleDateString('en-US', {
+                  month: 'short',
+                  day: 'numeric',
+                  year: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit'
+                }) : 
+                new Date().toLocaleDateString('en-US', {
+                  month: 'short',
+                  day: 'numeric'
+                })
+              }
+            </Text>
+            {isVideoPreview && (
+              <View style={styles.videoPreviewBadge}>
+                <Ionicons name="videocam" size={10} color="#3B82F6" />
+                <Text style={styles.videoPreviewText}>Video</Text>
+              </View>
+            )}
+          </View>
         </View>
         <TouchableOpacity 
           style={styles.previewDeleteButton}
@@ -620,7 +668,28 @@ const Wishlist = () => {
           <Ionicons name="arrow-back" size={24} color="#333" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{t('your_collections')}</Text>
-        <TouchableOpacity style={styles.headerMarkAll}>
+        <TouchableOpacity 
+          style={styles.headerMarkAll}
+          onPress={async () => {
+            // Mark wishlist as read
+            await markWishlistAsRead();
+            
+            // Also mark all notifications as read
+            if (markAllRead) {
+              await markAllRead();
+            }
+            
+            // Force immediate re-render
+            setRefreshKey(prev => prev + 1);
+            
+            Toast.show({
+              type: 'success',
+              text1: 'Success',
+              text2: 'All items marked as read',
+              position: 'top',
+            });
+          }}
+        >
           <Text style={styles.headerMarkAllText}>{t('mark_all_as_read')}</Text>
         </TouchableOpacity>
       </View>
@@ -632,6 +701,95 @@ const Wishlist = () => {
       
       {/* Content */}
       {renderContent()}
+
+      {/* Custom Remove Confirmation Modal */}
+      <Modal
+        visible={showRemoveModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowRemoveModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            {/* Heart Icon */}
+            <View style={styles.modalIconContainer}>
+              <View style={styles.modalHeartCircle}>
+                <Ionicons name="heart-dislike" size={40} color="#F53F7A" />
+              </View>
+            </View>
+
+            {/* Title */}
+            <Text style={styles.modalTitle}>Remove from Wishlist?</Text>
+
+            {/* Product Info */}
+            {itemToRemove && (
+              <View style={styles.modalProductInfo}>
+                <Image 
+                  source={{ uri: getFirstSafeProductImage(itemToRemove) }} 
+                  style={styles.modalProductImage}
+                />
+                <Text style={styles.modalProductName} numberOfLines={2}>
+                  {itemToRemove.name}
+                </Text>
+              </View>
+            )}
+
+            {/* Message */}
+            <Text style={styles.modalMessage}>
+              This item will be removed from all your collections
+            </Text>
+
+            {/* Buttons */}
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={styles.modalCancelButton}
+                onPress={() => {
+                  setShowRemoveModal(false);
+                  setItemToRemove(null);
+                }}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.modalRemoveButton}
+                onPress={async () => {
+                  if (!itemToRemove) return;
+                  
+                  // Close modal
+                  setShowRemoveModal(false);
+                  
+                  // Remove from wishlist
+                  removeFromWishlist(itemToRemove.id);
+                  
+                  // Remove from database
+                  if (userData?.id) {
+                    await supabase
+                      .from('collection_products')
+                      .delete()
+                      .match({ product_id: itemToRemove.id });
+                  }
+                  
+                  // Show success toast
+                  Toast.show({
+                    type: 'success',
+                    text1: 'Removed from Wishlist',
+                    text2: itemToRemove.name,
+                    position: 'top',
+                  });
+                  
+                  // Clear item
+                  setItemToRemove(null);
+                }}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.modalRemoveText}>Remove</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -921,11 +1079,46 @@ const styles = StyleSheet.create({
   previewSubtitle: { 
     fontSize: 13, 
     color: '#444', 
-    marginBottom: 4 
+    marginBottom: 8 
   },
-  previewTime: { 
-    fontSize: 12, 
-    color: '#888' 
+  previewMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  previewBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF0F5',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    gap: 4,
+  },
+  previewBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#F53F7A',
+  },
+  previewTimestamp: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: '#6B7280',
+  },
+  videoPreviewBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EFF6FF',
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 4,
+    gap: 3,
+  },
+  videoPreviewText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#3B82F6',
   },
   
   emptyContainer: { 
@@ -1102,10 +1295,11 @@ const styles = StyleSheet.create({
   folderInfo: {
     padding: 12,
     backgroundColor: '#fff',
+    minHeight: 70, // Ensure enough space for wrapped text
   },
   folderInfoRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start', // Changed from 'center' to allow proper text wrapping
     justifyContent: 'space-between',
   },
   folderTextContainer: {
@@ -1117,6 +1311,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#333',
     marginBottom: 4,
+    lineHeight: 20, // Better spacing for multi-line text
   },
   folderCount: {
     fontSize: 13,
@@ -1142,6 +1337,109 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#666',
+  },
+  // Custom Remove Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContainer: {
+    width: '85%',
+    maxWidth: 340,
+    backgroundColor: '#fff',
+    borderRadius: 24,
+    padding: 24,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 15,
+  },
+  modalIconContainer: {
+    marginBottom: 16,
+  },
+  modalHeartCircle: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#FFF0F5',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 3,
+    borderColor: '#F53F7A',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1a1a1a',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  modalProductInfo: {
+    alignItems: 'center',
+    marginBottom: 16,
+    width: '100%',
+  },
+  modalProductImage: {
+    width: 80,
+    height: 80,
+    borderRadius: 12,
+    marginBottom: 12,
+    backgroundColor: '#f5f5f5',
+  },
+  modalProductName: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#333',
+    textAlign: 'center',
+    paddingHorizontal: 16,
+  },
+  modalMessage: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 20,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    width: '100%',
+    gap: 12,
+  },
+  modalCancelButton: {
+    flex: 1,
+    backgroundColor: '#F3F4F6',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalCancelText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+  },
+  modalRemoveButton: {
+    flex: 1,
+    backgroundColor: '#F53F7A',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#F53F7A',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  modalRemoveText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#fff',
   },
 });
 

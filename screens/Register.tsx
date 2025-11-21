@@ -18,6 +18,7 @@ import {
   showErrorToast,
 } from '../utils/errorHandler';
 import { supabase } from '../utils/supabase';
+import { Only2ULogo } from '../components/common';
 
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
@@ -186,7 +187,7 @@ const Register = () => {
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.logoContainer}>
-          <Text style={styles.logoText}>Only<Text style={{ color: '#F53F7A' }}>2</Text>U</Text>
+          <Only2ULogo size="large" />
         </View>
       </View>
 
@@ -201,7 +202,7 @@ const Register = () => {
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.card}>
-          <Text style={styles.logoHeading}>Only<Text style={{ color: '#F53F7A' }}>2</Text>U</Text>
+          <Only2ULogo size="large" />
           <Text style={styles.subtitle}>Create your account</Text>
           
           <View style={styles.inputGroup}>

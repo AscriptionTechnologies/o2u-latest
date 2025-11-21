@@ -15,9 +15,10 @@ const { width, height } = Dimensions.get('window');
 
 interface OrderSuccessAnimationProps {
   visible: boolean;
-  orderNumber: string;
+  orderNumber?: string | number | null;
   onClose: () => void;
   onViewOrders: () => void;
+  coinsEarned?: number | null;
 }
 
 const OrderSuccessAnimation: React.FC<OrderSuccessAnimationProps> = ({
@@ -25,7 +26,18 @@ const OrderSuccessAnimation: React.FC<OrderSuccessAnimationProps> = ({
   orderNumber,
   onClose,
   onViewOrders,
+  coinsEarned,
 }) => {
+  const safeOrderNumber =
+    typeof orderNumber === 'string'
+      ? orderNumber || 'N/A'
+      : typeof orderNumber === 'number'
+      ? String(orderNumber)
+      : 'N/A';
+  const safeCoinsEarned =
+    typeof coinsEarned === 'number' && !Number.isNaN(coinsEarned)
+      ? coinsEarned
+      : 0;
   const scaleAnim = useRef(new Animated.Value(0)).current;
   const checkmarkScale = useRef(new Animated.Value(0)).current;
   const checkmarkRotate = useRef(new Animated.Value(0)).current;
@@ -39,6 +51,8 @@ const OrderSuccessAnimation: React.FC<OrderSuccessAnimationProps> = ({
   ).current;
   const contentOpacity = useRef(new Animated.Value(0)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
+  const coinScale = useRef(new Animated.Value(0)).current;
+  const coinRotate = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (visible) {
@@ -48,6 +62,8 @@ const OrderSuccessAnimation: React.FC<OrderSuccessAnimationProps> = ({
       checkmarkRotate.setValue(0);
       contentOpacity.setValue(0);
       pulseAnim.setValue(1);
+      coinScale.setValue(0);
+      coinRotate.setValue(0);
       confettiAnims.forEach((anim) => {
         anim.translateY.setValue(0);
         anim.translateX.setValue(0);
@@ -80,12 +96,30 @@ const OrderSuccessAnimation: React.FC<OrderSuccessAnimationProps> = ({
           }),
         ]),
       ]).start(() => {
-        // 3. Show content
-        Animated.timing(contentOpacity, {
-          toValue: 1,
-          duration: 400,
-          useNativeDriver: true,
-        }).start();
+        // 3. Show content and coin animation
+        Animated.parallel([
+          Animated.timing(contentOpacity, {
+            toValue: 1,
+            duration: 400,
+            useNativeDriver: true,
+          }),
+          Animated.sequence([
+            Animated.delay(200),
+            Animated.parallel([
+              Animated.spring(coinScale, {
+                toValue: 1,
+                tension: 80,
+                friction: 8,
+                useNativeDriver: true,
+              }),
+              Animated.timing(coinRotate, {
+                toValue: 1,
+                duration: 600,
+                useNativeDriver: true,
+              }),
+            ]),
+          ]),
+        ]).start();
 
         // 4. Start confetti
         confettiAnims.forEach((anim, index) => {
@@ -236,8 +270,45 @@ const OrderSuccessAnimation: React.FC<OrderSuccessAnimationProps> = ({
                 <Ionicons name="receipt-outline" size={20} color="#F53F7A" />
                 <Text style={styles.orderCardLabel}>Order Number</Text>
               </View>
-              <Text style={styles.orderNumber}>{orderNumber}</Text>
+            <Text style={styles.orderNumber}>{safeOrderNumber}</Text>
             </View>
+
+            {/* Coin Earnings Card - Animated */}
+            {safeCoinsEarned > 0 && (
+              <Animated.View
+                style={[
+                  styles.coinCard,
+                  {
+                    transform: [
+                      { scale: coinScale },
+                      {
+                        rotateY: coinRotate.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: ['0deg', '360deg'],
+                        }),
+                      },
+                    ],
+                  },
+                ]}
+              >
+                <LinearGradient
+                  colors={['#FBBF24', '#F59E0B']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.coinCardGradient}
+                >
+                  <View style={styles.coinCardContent}>
+                    <Ionicons name="diamond" size={28} color="#fff" />
+                    <View style={styles.coinCardTextContainer}>
+                      <Text style={styles.coinCardLabel}>You've Earned</Text>
+                      <Text style={styles.coinCardValue}>
+                        {String(safeCoinsEarned)} Coins! 🎉
+                      </Text>
+                    </View>
+                  </View>
+                </LinearGradient>
+              </Animated.View>
+            )}
 
             {/* Info Message */}
             <View style={styles.infoBox}>
@@ -363,6 +434,39 @@ const styles = StyleSheet.create({
     color: '#F53F7A',
     textAlign: 'center',
     letterSpacing: 1,
+  },
+  coinCard: {
+    width: '100%',
+    marginBottom: 20,
+    borderRadius: 16,
+    overflow: 'hidden',
+    shadowColor: '#F59E0B',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  coinCardGradient: {
+    padding: 18,
+  },
+  coinCardContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  coinCardTextContainer: {
+    flex: 1,
+  },
+  coinCardLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: 'rgba(255, 255, 255, 0.9)',
+    marginBottom: 4,
+  },
+  coinCardValue: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#fff',
   },
   infoBox: {
     flexDirection: 'row',

@@ -1,432 +1,556 @@
 import React from 'react';
 import {
-  View,
-  Text,
   FlatList,
-  TextInput,
-  ScrollView,
+  Image,
+  ImageBackground,
+  Modal,
   StyleSheet,
-  SafeAreaView,
+  Text,
+  TextInput,
   TouchableOpacity,
+  View,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
-import { Image } from 'expo-image';
-import { useTranslation } from 'react-i18next';
+import { Ionicons } from '@expo/vector-icons';
+import moment from 'moment';
+import Toast from 'react-native-toast-message';
 
-const stories = [
+interface MockConversation {
+  id: string;
+  friendId: string;
+  displayName: string;
+  avatar?: string;
+  lastMessage: string;
+  lastMessageTime: string;
+  unreadCount: number;
+  streak: number;
+  isTyping?: boolean;
+  snapImage?: string;
+}
+
+const mockConversations: MockConversation[] = [
   {
-    id: 'you',
-    name: 'You',
-    avatar: 'https://randomuser.me/api/portraits/men/1.jpg',
-    online: true,
-    isYou: true,
+    id: 'chat-1',
+    friendId: 'friend-1',
+    displayName: 'Alicia Blue',
+    avatar:
+      'https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?auto=format&fit=crop&w=200&q=60',
+    lastMessage: 'Sent a new face swap 🔥',
+    lastMessageTime: moment().subtract(12, 'minutes').toISOString(),
+    unreadCount: 2,
+    streak: 36,
+    isTyping: true,
+    snapImage:
+      'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=800&q=80',
   },
   {
-    id: '1',
-    name: 'Jhon Doe',
-    avatar: 'https://randomuser.me/api/portraits/women/2.jpg',
-    online: true,
+    id: 'chat-2',
+    friendId: 'friend-2',
+    displayName: 'Noah Park',
+    avatar:
+      'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=200&q=60',
+    lastMessage: 'That pink dress looked so good on you! 💖',
+    lastMessageTime: moment().subtract(1, 'hours').toISOString(),
+    unreadCount: 0,
+    streak: 24,
+    snapImage:
+      'https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=800&q=80',
   },
   {
-    id: '2',
-    name: 'Jhon Doe',
-    avatar: 'https://randomuser.me/api/portraits/men/3.jpg',
-    online: true,
+    id: 'chat-3',
+    friendId: 'friend-3',
+    displayName: 'Sofia Chen',
+    avatar:
+      'https://images.unsplash.com/photo-1487412720507-e7ab37603c6f?auto=format&fit=crop&w=200&q=60',
+    lastMessage: 'Let’s try the new shimmer filter tonight ✨',
+    lastMessageTime: moment().subtract(3, 'hours').toISOString(),
+    unreadCount: 1,
+    streak: 12,
+    snapImage:
+      'https://images.unsplash.com/photo-1512436991641-6745cdb1723f?auto=format&fit=crop&w=800&q=80',
   },
   {
-    id: '3',
-    name: 'Jhon Doe',
-    avatar: 'https://randomuser.me/api/portraits/men/4.jpg',
-    online: true,
+    id: 'chat-4',
+    friendId: 'friend-4',
+    displayName: 'Jordan Miles',
+    avatar:
+      'https://images.unsplash.com/photo-1504593811423-6dd665756598?auto=format&fit=crop&w=200&q=60',
+    lastMessage: 'Delivered a streak pic 🔥',
+    lastMessageTime: moment().subtract(14, 'hours').toISOString(),
+    unreadCount: 0,
+    streak: 7,
+    snapImage:
+      'https://images.unsplash.com/photo-1534447677768-be436bb09401?auto=format&fit=crop&w=800&q=80',
   },
   {
-    id: '4',
-    name: 'Jhon Doe',
-    avatar: 'https://randomuser.me/api/portraits/men/5.jpg',
-    online: true,
+    id: 'chat-5',
+    friendId: 'friend-5',
+    displayName: 'Priya Patel',
+    avatar:
+      'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=200&q=60',
+    lastMessage: 'Face swap ready – check it out! 😍',
+    lastMessageTime: moment().subtract(1, 'days').toISOString(),
+    unreadCount: 0,
+    streak: 3,
+    snapImage:
+      'https://images.unsplash.com/photo-1498050108023-c5249f4df085?auto=format&fit=crop&w=800&q=80',
   },
 ];
 
-const chats = [
-  {
-    id: '1',
-    name: 'John Doe',
-    avatar: 'https://randomuser.me/api/portraits/men/6.jpg',
-    lastMessage: 'Hi, How are you?',
-    time: '06:41 PM',
-    unread: 1,
-    online: true,
-  },
-  {
-    id: '2',
-    name: 'Devon Lane',
-    avatar: 'https://randomuser.me/api/portraits/men/7.jpg',
-    lastMessage: "You: Okay, I'll sent the doc...",
-    time: 'Yesterday',
-    seen: true,
-    online: true,
-  },
-  {
-    id: '3',
-    name: 'Bessie Cooper',
-    avatar: 'https://randomuser.me/api/portraits/men/8.jpg',
-    lastMessage: "You: I'm glad to hear that",
-    time: '29 May 2025',
-    seen: true,
-    online: true,
-  },
-  {
-    id: '4',
-    name: 'Cody Fisher',
-    avatar: 'https://randomuser.me/api/portraits/men/9.jpg',
-    lastMessage: 'Why did the scarecrow wi...',
-    time: '29 May 2025',
-    unread: 2,
-    online: true,
-  },
-  {
-    id: '5',
-    name: 'Kathryn Murphy',
-    avatar: 'https://randomuser.me/api/portraits/men/10.jpg',
-    lastMessage: "What's the weather like to...",
-    time: '24 May 2025',
-    seen: true,
-    online: true,
-  },
-  {
-    id: '6',
-    name: 'Ronald Richards',
-    avatar: 'https://randomuser.me/api/portraits/men/11.jpg',
-    lastMessage: 'How does photosynthesis...',
-    time: '21 May 2025',
-    seen: true,
-    online: true,
-  },
-];
+const MessagesScreen: React.FC = () => {
+  const navigation = useNavigation<any>();
+  const [search, setSearch] = React.useState('');
+  const [conversations, setConversations] = React.useState(mockConversations);
+  const [activeSnap, setActiveSnap] = React.useState<MockConversation | null>(null);
 
-const Messages = () => {
-  const navigation = useNavigation();
-  const { t } = useTranslation();
+  const handleOpenThread = (friendId: string) => {
+    navigation.navigate('ChatThread', { friendId });
+  };
+
+  const filteredConversations = React.useMemo(() => {
+    const trimmed = search.trim().toLowerCase();
+    if (!trimmed) return conversations;
+    return conversations.filter((conversation) => {
+      const nameMatch = conversation.displayName.toLowerCase().includes(trimmed);
+      const messageMatch = conversation.lastMessage.toLowerCase().includes(trimmed);
+      return nameMatch || messageMatch;
+    });
+  }, [search, conversations]);
+
+  const handleConversationPress = (conversation: MockConversation) => {
+    if (conversation.unreadCount > 0 && conversation.snapImage) {
+      setActiveSnap(conversation);
+    } else {
+      handleOpenThread(conversation.friendId);
+    }
+  };
+
+  const markSnapViewed = (conversationId: string) => {
+    setConversations((prev) =>
+      prev.map((conversation) =>
+        conversation.id === conversationId
+          ? { ...conversation, unreadCount: 0, isTyping: false }
+          : conversation
+      )
+    );
+  };
+
+  const renderConversation = ({ item }: { item: MockConversation }) => (
+    <TouchableOpacity
+      activeOpacity={0.9}
+      onPress={() => handleConversationPress(item)}
+      style={styles.conversationRow}
+    >
+      {item.avatar ? (
+        <Image source={{ uri: item.avatar }} style={styles.conversationAvatar} />
+      ) : (
+        <View style={styles.conversationAvatarFallback}>
+          <Ionicons name="person" size={30} color="#F53F7A" />
+        </View>
+      )}
+
+      <View style={styles.conversationContent}>
+        <View style={styles.conversationHeader}>
+          <Text style={styles.conversationName} numberOfLines={1}>
+            {item.displayName}
+          </Text>
+          <Text style={styles.conversationTime}>
+            {moment(item.lastMessageTime).fromNow()}
+          </Text>
+        </View>
+        <View style={styles.conversationPreviewRow}>
+          {item.isTyping ? (
+            <Text style={styles.typingText}>typing…</Text>
+          ) : item.unreadCount > 0 ? (
+            <View style={styles.previewUnreadRow}>
+              <Ionicons name="square" size={18} color="#F53F7A" />
+              <Text style={styles.conversationPreviewNew}>Tap to view</Text>
+              <Text style={styles.previewUnreadHint}>• New</Text>
+            </View>
+          ) : (
+            <Text style={styles.conversationPreviewOpened}>Opened • Tap to view</Text>
+          )}
+        </View>
+      </View>
+
+      <View style={styles.conversationMeta}>
+        <View style={styles.streakChip}>
+          <Ionicons name="flame" size={14} color="#F53F7A" />
+          <Text style={styles.streakChipText}>{item.streak}</Text>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+
   return (
-    <View style={styles.container}>
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity style={styles.backButton}>
-            <Ionicons name="arrow-back" size={24} color="#3DF45B" />
-          </TouchableOpacity>
-          <View style={{ flex: 1, alignItems: 'center' }}>
-            <Text style={styles.headerTitle}>{t('messages')}</Text>
-            <Text style={styles.headerSubtitle}>{t('stay_connected_with_team')}</Text>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right', 'bottom']}>
+      <View style={styles.headerRow}>
+        <View>
+          <Text style={styles.headerTitle}>Chats</Text>
+          <Text style={styles.headerSubtitle}>Stay in touch with your streaks</Text>
           </View>
-          <TouchableOpacity style={styles.headerIcon} onPress={() => navigation.navigate('Notifications')}>
-            <Ionicons name="notifications" size={24} color="#3DF45B" />
-            <View style={styles.dot} />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.headerIcon}>
-            <Ionicons name="add-circle" size={24} color="#3DF45B" />
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onPress={() => navigation.navigate('FriendSearch')}
+          style={styles.addButton}
+        >
+          <Ionicons name="person-add" size={20} color="#F53F7A" />
           </TouchableOpacity>
         </View>
-        <View style={styles.searchAndStoriesContainer}>
-        {/* Search bar */}
-        <View style={styles.searchBarWrap}>
-          <Ionicons name="search" size={18} color="#B0B6BE" style={{ marginLeft: 16 }} />
+
+      <View style={styles.searchBar}>
+        <Ionicons name="search" size={18} color="#8E8E93" style={{ marginRight: 8 }} />
           <TextInput
-            style={styles.searchBar}
-            placeholder="Search conversations..."
-            placeholderTextColor="#B0B6BE"
+          style={styles.searchInput}
+          value={search}
+          onChangeText={setSearch}
+          placeholder="Search chats"
+          placeholderTextColor="#B4B4B6"
+          autoCorrect={false}
+          autoCapitalize="none"
           />
-          <TouchableOpacity style={styles.filterButton}>
-            <Ionicons name="filter" size={18} color="#3DF45B" />
+        {search.length > 0 && (
+          <TouchableOpacity onPress={() => setSearch('')}>
+            <Ionicons name="close-circle" size={20} color="#C7C7CC" />
           </TouchableOpacity>
+        )}
+      </View>
+
+      <FlatList
+        data={filteredConversations}
+        keyExtractor={(item) => item.id}
+        contentContainerStyle={styles.conversationList}
+        renderItem={renderConversation}
+        ListEmptyComponent={
+          search.trim() ? (
+            <View style={styles.emptyState}>
+              <Ionicons name="search-outline" size={44} color="#F53F7A" />
+              <Text style={styles.emptyText}>No chats found</Text>
+              <Text style={styles.emptySubtext}>
+                Try searching by name or a message keyword.
+              </Text>
         </View>
-        {/* Active Contacts */}
-        <View style={styles.storiesSection}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>{t('active_now')}</Text>
-            <TouchableOpacity>
-              <Text style={styles.seeAllText}>{t('see_all')}</Text>
-            </TouchableOpacity>
+          ) : null
+        }
+      />
+
+      <Modal visible={!!activeSnap} animationType="fade" transparent>
+        <View style={styles.snapOverlay}>
+          <TouchableOpacity
+            activeOpacity={1}
+            style={{ flex: 1 }}
+            onPress={() => {
+              if (activeSnap) {
+                markSnapViewed(activeSnap.id);
+              }
+              setActiveSnap(null);
+            }}
+          >
+            {activeSnap?.snapImage ? (
+              <ImageBackground
+                source={{ uri: activeSnap.snapImage }}
+                style={styles.snapImage}
+                resizeMode="cover"
+              >
+                <View style={styles.snapTopBar}>
+                  <View style={styles.snapTimer}>
+                    <Ionicons name="timer" size={14} color="#fff" />
+                    <Text style={styles.snapTimerText}>3s</Text>
           </View>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={{ marginBottom: 18 }}>
-            {stories.map((story, idx) => (
-              <TouchableOpacity key={story.id} style={styles.storyWrap}>
-                <View
-                  style={[
-                    styles.storyAvatarWrap,
-                    story.online && styles.storyOnlineWrap,
-                    story.isYou && styles.storyYouWrap,
-                  ]}>
-                  <Image source={{ uri: story.avatar }} style={styles.storyAvatar} />
-                  {story.isYou && (
-                    <View style={styles.storyAddBtn}>
-                      <Ionicons name="add" color="#000" size={16} />
+                  <View style={styles.snapNameBubble}>
+                    <Text style={styles.snapName}>{activeSnap.displayName}</Text>
+                    <Text style={styles.snapSubtitle}>sent you a snap</Text>
                     </View>
-                  )}
-                  {story.online && !story.isYou && <View style={styles.storyOnlineDot} />}
                 </View>
-                <Text style={styles.storyName}>{story.name}</Text>
+                <View style={styles.snapFooter}>
+                  <View style={styles.reactionsRow}>
+                    {['😍', '🔥', '😂', '👏', '🤯'].map((reaction) => (
+                      <TouchableOpacity
+                        key={reaction}
+                        style={styles.reactionChip}
+                        activeOpacity={0.85}
+                        onPress={() => {
+                          Toast.show({
+                            type: 'success',
+                            text1: 'Reaction sent',
+                            text2: `${reaction} reaction shared with ${activeSnap.displayName}.`,
+                          });
+                          markSnapViewed(activeSnap.id);
+                          setActiveSnap(null);
+                        }}
+                      >
+                        <Text style={styles.reactionText}>{reaction}</Text>
               </TouchableOpacity>
             ))}
-          </ScrollView>
-        </View>
-
-        </View>
-        {/* Chat List */}
-        <FlatList
-          data={chats}
-          keyExtractor={(item) => item.id}
-          showsVerticalScrollIndicator={false}
-          renderItem={({ item }) => (
-            <TouchableOpacity style={styles.chatRow} onPress={() => navigation.navigate('MessageDetail', { user: item })}>
-              <View style={styles.chatAvatarWrap}>
-                <Image source={{ uri: item.avatar }} style={styles.chatAvatar} />
-                {item.online && <View style={styles.chatOnlineDot} />}
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.chatName}>{item.name}</Text>
-                <Text style={styles.chatMsg} numberOfLines={1}>
-                  {item.lastMessage}
-                </Text>
-              </View>
-              <View style={styles.chatMeta}>
-                <Text style={styles.chatTime}>{item.time}</Text>
-                {item.unread ? (
-                  <View style={styles.unreadBadge}>
-                    <Text style={styles.unreadText}>{item.unread}</Text>
                   </View>
-                ) : item.seen ? (
-                  <Text style={styles.seenText}>{t('seen')}</Text>
-                ) : null}
+                  <Text style={styles.snapHint}>Tap to close</Text>
+                </View>
+              </ImageBackground>
+            ) : (
+              <View style={styles.snapFallback}>
+                <Ionicons name="image" size={48} color="#fff" />
               </View>
+            )}
             </TouchableOpacity>
-          )}
-          contentContainerStyle={{ paddingBottom: 24 }}
-        />
     </View>
+      </Modal>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#181C20',
-    paddingTop: 0,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 18,
+    paddingTop: 14,
   },
-  header: {
+  headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#101418',
-    paddingTop: 70,
-    paddingBottom: 18,
-    paddingHorizontal: 18,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.04)',
+    justifyContent: 'space-between',
+    marginBottom: 16,
   },
   headerTitle: {
-    color: '#fff',
-    fontSize: 22,
-    fontWeight: 'bold',
-    textAlign: 'center',
+    fontSize: 28,
+    fontWeight: '800',
+    color: '#1C1C1E',
+    letterSpacing: -0.5,
   },
   headerSubtitle: {
-    color: '#B0B6BE',
-    textAlign: 'center',
     marginTop: 2,
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#8E8E93',
   },
-  headerIcon: {
-    marginLeft: 12,
-    position: 'relative',
-    justifyContent: 'center',
+  addButton: {
+    height: 40,
+    width: 40,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(245, 63, 122, 0.25)',
     alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFF4F9',
   },
-  dot: {
-    position: 'absolute',
-    top: 2,
-    right: 2,
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#3DF45B',
-    borderWidth: 2,
-    borderColor: '#101418',
-  },
-  backButton: {
-    padding: 8,
-  },
-  searchAndStoriesContainer: {
-    backgroundColor: 'rgba(24,28,32,0.95)',
-    borderBottomLeftRadius: 24,
-    borderBottomRightRadius: 24,
-    paddingBottom: 8,
-  },
-  searchBarWrap: {
+  searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: 22,
-    margin: 18,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    height: 48,
+    backgroundColor: '#F7F7F8',
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginBottom: 16,
   },
-  filterButton: {
-    padding: 12,
-    marginRight: 4,
+  searchInput: {
+    flex: 1,
+    fontSize: 15,
+    color: '#1C1C1E',
   },
-  storiesSection: {
-    paddingHorizontal: 18,
+  conversationList: {
+    paddingBottom: 24,
   },
-  sectionHeader: {
+  conversationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: '#F2F2F2',
+  },
+  conversationAvatar: {
+    width: 60,
+    height: 60,
+    borderRadius: 24,
+    marginRight: 14,
+  },
+  conversationAvatarFallback: {
+    width: 60,
+    height: 60,
+    borderRadius: 24,
+    backgroundColor: '#FFE1EC',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 14,
+  },
+  conversationContent: {
+    flex: 1,
+  },
+  conversationHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
   },
-  sectionTitle: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
+  conversationName: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#1C1C1E',
+    flex: 1,
+    marginRight: 12,
   },
-  seeAllText: {
-    color: '#3DF45B',
-    fontSize: 14,
+  conversationTime: {
+    fontSize: 12,
+    color: '#B0B3C0',
     fontWeight: '600',
   },
-  searchBar: {
-    flex: 1,
-    fontSize: 16,
-    color: '#fff',
-    paddingHorizontal: 10,
-    backgroundColor: 'transparent',
-  },
-  storyWrap: {
-    alignItems: 'center',
-    marginHorizontal: 8,
-  },
-  storyAvatarWrap: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
-    backgroundColor: '#23272F',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 4,
-    position: 'relative',
-  },
-  storyOnlineWrap: {
-    borderWidth: 3,
-    borderColor: '#3DF45B',
-  },
-  storyYouWrap: {
-    borderWidth: 0,
-  },
-  storyAvatar: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    resizeMode: 'cover',
-  },
-  storyAddBtn: {
-    position: 'absolute',
-    bottom: -2,
-    right: -2,
-    backgroundColor: '#3DF45B',
-    borderRadius: 12,
-    width: 20,
-    height: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  storyOnlineDot: {
-    position: 'absolute',
-    bottom: 2,
-    right: 2,
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    backgroundColor: '#3DF45B',
-  },
-  storyName: {
-    fontSize: 13,
-    marginTop: 2,
-    textAlign: 'center',
-    width: 70,
-    color: '#fff',
-    fontWeight: '500',
-  },
-  chatRow: {
+  conversationPreviewRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 18,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.04)',
-    backgroundColor: 'transparent',
+    marginTop: 4,
   },
-  chatAvatarWrap: {
-    marginRight: 14,
-    position: 'relative',
+  conversationPreview: {
+    fontSize: 14,
+    color: '#666A7B',
   },
-  chatAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+  conversationPreviewNew: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#F53F7A',
   },
-  chatOnlineDot: {
-    position: 'absolute',
-    bottom: 2,
-    right: 2,
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#3DF45B',
-    borderWidth: 2,
-    borderColor: '#181C20',
+  conversationPreviewOpened: {
+    fontSize: 14,
+    color: '#8E8E93',
+    fontStyle: 'italic',
   },
-  chatName: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 2,
+  typingText: {
+    fontSize: 14,
+    color: '#F53F7A',
+    fontWeight: '600',
   },
-  chatMsg: {
-    color: '#B0B6BE',
-    fontSize: 15,
-    marginBottom: 2,
-  },
-  chatMeta: {
+  conversationMeta: {
     alignItems: 'flex-end',
-    marginLeft: 10,
-    minWidth: 60,
+    marginLeft: 12,
+    gap: 8,
   },
-  chatTime: {
-    color: '#B0B6BE',
+  streakChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: '#FFE8F1',
+    borderWidth: 1,
+    borderColor: 'rgba(245, 63, 122, 0.2)',
+  },
+  streakChipText: {
+    marginLeft: 4,
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#F53F7A',
+  },
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: 48,
+  },
+  emptyText: {
+    marginTop: 12,
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#1C1C1E',
+  },
+  emptySubtext: {
+    marginTop: 6,
+    fontSize: 14,
+    color: '#6F6F70',
+    textAlign: 'center',
+  },
+  previewUnreadRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  previewUnreadHint: {
     fontSize: 13,
-    marginBottom: 6,
+    color: '#8E8E93',
+    fontWeight: '600',
   },
-  unreadBadge: {
-    backgroundColor: '#3DF45B',
-    borderRadius: 12,
-    minWidth: 24,
-    height: 24,
+  snapOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  snapImage: {
+    flex: 1,
+    width: '100%',
+    borderRadius: 24,
+    overflow: 'hidden',
+    justifyContent: 'space-between',
+  },
+  snapTopBar: {
+    paddingHorizontal: 20,
+    paddingTop: 28,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  snapTimer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    borderRadius: 14,
+  },
+  snapTimerText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  snapNameBubble: {
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 18,
+  },
+  snapName: {
+    color: '#fff',
+    fontWeight: '800',
+    fontSize: 16,
+  },
+  snapSubtitle: {
+    color: '#fff',
+    fontSize: 12,
+    marginTop: 2,
+    opacity: 0.9,
+  },
+  snapFooter: {
+    paddingBottom: 32,
+    alignItems: 'center',
+  },
+  snapHint: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+    letterSpacing: 1,
+  },
+  snapFallback: {
+    flex: 1,
+    width: '100%',
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  reactionsRow: {
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 6,
+    gap: 12,
+    marginBottom: 12,
   },
-  unreadText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 15,
+  reactionChip: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  seenText: {
-    color: '#B0B6BE',
-    fontSize: 13,
-    marginTop: 2,
+  reactionText: {
+    fontSize: 22,
   },
 });
 
-export default Messages;
+export default MessagesScreen;

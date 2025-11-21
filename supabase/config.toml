@@ -331,3 +331,15 @@ entrypoint = "./functions/delete-user/index.ts"
 # Specifies static files to be bundled with the function. Supports glob patterns.
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/delete-user/*.html" ]
+
+[functions.create-razorpay-order]
+enabled = true
+verify_jwt = false
+import_map = "./functions/create-razorpay-order/deno.json"
+entrypoint = "./functions/create-razorpay-order/index.ts"
+
+[functions.verify-razorpay-payment]
+enabled = true
+verify_jwt = false
+import_map = "./functions/verify-razorpay-payment/deno.json"
+entrypoint = "./functions/verify-razorpay-payment/index.ts"

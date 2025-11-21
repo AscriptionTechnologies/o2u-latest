@@ -175,6 +175,9 @@ export interface ResellerRegistrationForm {
   account_holder_name?: string;
 }
 
+
+
+
 export interface ResellerProductForm {
   product_id: string;
   variant_id?: string;
@@ -186,6 +189,9 @@ export interface ResellerProductForm {
   custom_description?: string;
   tags: string[];
 }
+
+
+
 
 export interface CatalogShareForm {
   product_id: string;

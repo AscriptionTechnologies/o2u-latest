@@ -1,7 +1,7 @@
 export type RootStackParamList = {
   Dashboard: undefined;
   ProductDetails: {
-    product: {
+    product?: {
       id: string;
       name: string;
       price: number;
@@ -16,6 +16,7 @@ export type RootStackParamList = {
       featured?: boolean;
       images?: number;
     };
+    productId?: string; // Alternative: fetch product by ID
   };
   Products: {
     category: {
@@ -32,6 +33,9 @@ export type RootStackParamList = {
   Profile: undefined;
   EditProfile: undefined;
   MyOrders: undefined;
+  OrderDetails: {
+    orderId: string;
+  };
   BodyMeasurements: undefined;
   HelpCenter: undefined;
   Wishlist: undefined;
@@ -40,6 +44,12 @@ export type RootStackParamList = {
     productImageUrl: string;
     productName: string;
   };
+  Messages: undefined;
+  ChatThread: {
+    friendId: string;
+    conversationId?: string;
+  };
+  FriendSearch: undefined;
   PersonalizedProductResult: {
     product: {
       id: string;
@@ -71,13 +81,22 @@ export type RootStackParamList = {
       updated_at: string;
     };
   };
+  VendorDashboard: undefined;
   PrivacyPolicy: undefined;
   TermsAndConditions: undefined;
   RefundPolicy: undefined;
+  AllReviews: {
+    productId: string;
+    productName: string;
+    averageRating: number;
+    totalReviews: number;
+    reviews: any[];
+  };
 };
 
 export type TabParamList = {
   Home: undefined;
   Trending: undefined;
   Cart: undefined;
+  Messages: undefined;
 };

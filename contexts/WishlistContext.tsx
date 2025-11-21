@@ -19,22 +19,30 @@ export interface WishlistProduct {
 
 interface WishlistContextType {
   wishlist: WishlistProduct[];
+  unreadCount: number;
   addToWishlist: (product: WishlistProduct) => void;
   removeFromWishlist: (productId: string) => void;
   toggleWishlist: (product: WishlistProduct) => void;
   isInWishlist: (productId: string) => boolean;
   clearWishlist: () => void;
+  markAllAsRead: () => void;
 }
 
 const WishlistContext = createContext<WishlistContextType | undefined>(undefined);
 
 export const WishlistProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [wishlist, setWishlist] = useState<WishlistProduct[]>([]);
+  const [unreadCount, setUnreadCount] = useState<number>(0);
   const { userData } = useUser();
 
   // Get user-specific wishlist key
   const getWishlistKey = () => {
     return userData?.id ? `@only2u_wishlist_${userData.id}` : null;
+  };
+
+  // Get user-specific unread count key
+  const getUnreadCountKey = () => {
+    return userData?.id ? `@only2u_wishlist_unread_${userData.id}` : null;
   };
 
   useEffect(() => {
@@ -58,9 +66,17 @@ export const WishlistProvider: React.FC<{ children: ReactNode }> = ({ children }
       } else {
         setWishlist([]);
       }
+
+      // Load unread count
+      const unreadCountKey = getUnreadCountKey();
+      if (unreadCountKey) {
+        const storedUnreadCount = await AsyncStorage.getItem(unreadCountKey);
+        setUnreadCount(storedUnreadCount ? parseInt(storedUnreadCount, 10) : 0);
+      }
     } catch (error) {
       console.error('Error loading wishlist:', error);
       setWishlist([]);
+      setUnreadCount(0);
     }
   };
 
@@ -74,7 +90,7 @@ export const WishlistProvider: React.FC<{ children: ReactNode }> = ({ children }
     }
   };
 
-  const addToWishlist = (product: WishlistProduct) => {
+  const addToWishlist = async (product: WishlistProduct) => {
     if (!userData?.id) {
       return;
     }
@@ -85,6 +101,16 @@ export const WishlistProvider: React.FC<{ children: ReactNode }> = ({ children }
 
     const updatedWishlist = [...wishlist, product];
     setWishlist(updatedWishlist);
+    
+    // Increment unread count
+    const newUnreadCount = unreadCount + 1;
+    setUnreadCount(newUnreadCount);
+    
+    // Save both wishlist and unread count
+    const unreadCountKey = getUnreadCountKey();
+    if (unreadCountKey) {
+      await AsyncStorage.setItem(unreadCountKey, newUnreadCount.toString());
+    }
     saveWishlist();
   };
 
@@ -120,18 +146,42 @@ export const WishlistProvider: React.FC<{ children: ReactNode }> = ({ children }
     try {
       setWishlist([]);
       await AsyncStorage.removeItem(`wishlist_${userData.id}`);
+      
+      // Also clear unread count
+      const unreadCountKey = getUnreadCountKey();
+      if (unreadCountKey) {
+        setUnreadCount(0);
+        await AsyncStorage.removeItem(unreadCountKey);
+      }
     } catch (error) {
       console.error('Error clearing wishlist:', error);
     }
   };
 
+  const markAllAsRead = async () => {
+    if (!userData?.id) return;
+
+    try {
+      // Clear unread count without removing items from wishlist
+      setUnreadCount(0);
+      const unreadCountKey = getUnreadCountKey();
+      if (unreadCountKey) {
+        await AsyncStorage.removeItem(unreadCountKey);
+      }
+    } catch (error) {
+      console.error('Error marking wishlist as read:', error);
+    }
+  };
+
   const value: WishlistContextType = {
     wishlist,
+    unreadCount,
     addToWishlist,
     removeFromWishlist,
     toggleWishlist,
     isInWishlist,
     clearWishlist,
+    markAllAsRead,
   };
 
   return (

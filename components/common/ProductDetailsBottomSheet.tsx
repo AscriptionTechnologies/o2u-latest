@@ -12,8 +12,11 @@ import {
   Linking,
   Platform,
   ToastAndroid,
-  Clipboard,
-  Alert
+  Alert,
+  Modal,
+  StatusBar,
+  Animated,
+  TextInput,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { AntDesign } from '@expo/vector-icons';
@@ -33,9 +36,46 @@ import { useTranslation } from 'react-i18next';
 import { getSafeImageUrls, getFirstSafeImageUrl, getProductImages, getFirstSafeProductImage } from '../../utils/imageUtils';
 import BottomSheet from '@gorhom/bottom-sheet';
 import { BottomSheetScrollView } from '@gorhom/bottom-sheet';
-import { SaveToCollectionSheet } from '~/components/common';
+import { SaveToCollectionSheet, ProfilePhotoRequiredModal } from '~/components/common';
+import { useLoginSheet } from '~/contexts/LoginSheetContext';
+import { GestureHandlerRootView, PanGestureHandler, PinchGestureHandler, State } from 'react-native-gesture-handler';
 
 const { width } = Dimensions.get('window');
+
+// Size sorting constants and functions
+const SIZE_PRIORITY = [
+  'XXS',
+  'XS',
+  'S',
+  'M',
+  'L',
+  'XL',
+  '2XL',
+  '3XL',
+  '4XL',
+  '5XL',
+  '6XL',
+  '7XL',
+  '8XL',
+];
+
+const getSizeSortValue = (sizeName: string) => {
+  if (!sizeName) return Number.MAX_SAFE_INTEGER;
+  const normalized = sizeName.trim().toUpperCase();
+  const priorityIndex = SIZE_PRIORITY.indexOf(normalized);
+  if (priorityIndex !== -1) return priorityIndex;
+
+  const numericValue = parseFloat(normalized.replace(/[^0-9.]/g, ''));
+  if (!Number.isNaN(numericValue)) {
+    return SIZE_PRIORITY.length + numericValue;
+  }
+
+  return SIZE_PRIORITY.length + normalized.charCodeAt(0);
+};
+
+const sortSizesAscending = <T extends { name: string }>(sizes: T[]): T[] => {
+  return [...sizes].sort((a, b) => getSizeSortValue(a.name) - getSizeSortValue(b.name));
+};
 
 interface ProductVariant {
   id: string;
@@ -83,17 +123,20 @@ interface ProductDetailsBottomSheetProps {
   visible: boolean;
   product: Product | null;
   onClose: () => void;
+  onShowCollectionSheet?: (product: any) => void;
 }
 
 const ProductDetailsBottomSheet: React.FC<ProductDetailsBottomSheetProps> = ({
   visible,
   product,
   onClose,
+  onShowCollectionSheet,
 }) => {
   const navigation = useNavigation<StackNavigationProp<RootStackParamList>>();
   const { userData, setUserData, refreshUserData } = useUser();
+  const { showLoginSheet } = useLoginSheet();
   const { addToCart } = useCart();
-  const { isInWishlist, toggleWishlist, removeFromWishlist } = useWishlist();
+  const { isInWishlist, toggleWishlist, removeFromWishlist, addToWishlist } = useWishlist();
   const { addToPreview } = usePreview();
   const { t } = useTranslation();
 
@@ -103,8 +146,22 @@ const ProductDetailsBottomSheet: React.FC<ProductDetailsBottomSheetProps> = ({
   
   // Try on modal state
   const [showTryOnModal, setShowTryOnModal] = useState(false);
-  const [selectedOption, setSelectedOption] = useState<'photo' | 'video' | null>(null);
+  const [showProfilePhotoModal, setShowProfilePhotoModal] = useState(false);
+  const [showConsentModal, setShowConsentModal] = useState(false);
+  const [showSizeSelectionModal, setShowSizeSelectionModal] = useState(false);
+  const [sizeSelectionDraft, setSizeSelectionDraft] = useState<string | null>(null);
+  const [sizeSelectionError, setSizeSelectionError] = useState('');
+  const [tryOnSizeId, setTryOnSizeId] = useState<string | null>(null);
   const [coinBalance, setCoinBalance] = useState(0);
+
+  const promptLoginForTryOn = useCallback(() => {
+    Toast.show({
+      type: 'info',
+      text1: 'Login Required',
+      text2: 'Please login to use Face Swap.',
+    });
+    showLoginSheet();
+  }, [showLoginSheet]);
   
   // Vendor info from product data
   const vendorName = (product as any)?.vendor_name || 'Unknown Vendor';
@@ -120,12 +177,21 @@ const ProductDetailsBottomSheet: React.FC<ProductDetailsBottomSheetProps> = ({
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [productImages, setProductImages] = useState<string[]>([]);
   const [shareModalVisible, setShareModalVisible] = useState(false);
+  const [showMarginModal, setShowMarginModal] = useState(false);
+  const [selectedMargin, setSelectedMargin] = useState(15);
+  const [customPrice, setCustomPrice] = useState('');
+  const [customPriceError, setCustomPriceError] = useState<string | null>(null);
   const [reviews, setReviews] = useState<any[]>([]);
   const [reviewsLoading, setReviewsLoading] = useState(false);
+  
+  // More Like This suggestions
+  const [suggestedProducts, setSuggestedProducts] = useState<any[]>([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   
   // Video state
   const [videoStates, setVideoStates] = useState<{ [key: number]: { isPlaying: boolean; isMuted: boolean } }>({});
   const videoRefs = useRef<{ [key: number]: any }>({});
+  const mediaListRef = useRef<FlatList<MediaItem>>(null);
   
   // Unified media interface
   interface MediaItem {
@@ -134,6 +200,192 @@ const ProductDetailsBottomSheet: React.FC<ProductDetailsBottomSheetProps> = ({
     thumbnail?: string;
   }
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
+  const [isFullScreenVisible, setIsFullScreenVisible] = useState(false);
+  const [imageViewerIndex, setImageViewerIndex] = useState(0);
+  const [fullScreenMediaType, setFullScreenMediaType] = useState<'image' | 'video'>('image');
+  const [isFullScreenVideoPlaying, setIsFullScreenVideoPlaying] = useState(true);
+  const [currentZoom, setCurrentZoom] = useState(1);
+  const baseScale = useRef(new Animated.Value(1)).current;
+  const pinchScale = useRef(new Animated.Value(1)).current;
+  const combinedScale = Animated.multiply(baseScale, pinchScale);
+  const translateXFullscreen = useRef(new Animated.Value(0)).current;
+  const translateYFullscreen = useRef(new Animated.Value(0)).current;
+  const lastScale = useRef(1);
+  const lastTranslateX = useRef(0);
+  const lastTranslateY = useRef(0);
+
+  const selectedTryOnSizeName = useMemo(() => {
+    const targetId = tryOnSizeId || sizeSelectionDraft || selectedSize;
+    if (!targetId) return null;
+    const size = availableSizes.find((s) => s.id === targetId);
+    return size?.name || null;
+  }, [tryOnSizeId, sizeSelectionDraft, selectedSize, availableSizes]);
+
+  const resetFullScreenZoom = useCallback(() => {
+    baseScale.setValue(1);
+    pinchScale.setValue(1);
+    translateXFullscreen.setValue(0);
+    translateYFullscreen.setValue(0);
+    translateXFullscreen.setOffset(0);
+    translateYFullscreen.setOffset(0);
+    translateXFullscreen.flattenOffset();
+    translateYFullscreen.flattenOffset();
+    lastScale.current = 1;
+    lastTranslateX.current = 0;
+    lastTranslateY.current = 0;
+    setCurrentZoom(1);
+  }, [baseScale, pinchScale, translateXFullscreen, translateYFullscreen]);
+
+  useEffect(() => {
+    if (!visible) {
+      setIsFullScreenVisible(false);
+      resetFullScreenZoom();
+      setCurrentZoom(1);
+    }
+  }, [visible, resetFullScreenZoom]);
+
+  useEffect(() => {
+    resetFullScreenZoom();
+  }, [imageViewerIndex, resetFullScreenZoom]);
+
+  const onPinchEvent = Animated.event([{ nativeEvent: { scale: pinchScale } }], {
+    useNativeDriver: true,
+  });
+
+  const onPinchStateChange = (event: any) => {
+    if (event.nativeEvent.oldState === State.ACTIVE) {
+      let nextScale = lastScale.current * event.nativeEvent.scale;
+      nextScale = Math.max(1, Math.min(nextScale, 2.5));
+      baseScale.setValue(nextScale);
+      pinchScale.setValue(1);
+      lastScale.current = nextScale;
+      setCurrentZoom(parseFloat(nextScale.toFixed(2)));
+
+      if (nextScale === 1) {
+        Animated.parallel([
+          Animated.spring(translateXFullscreen, {
+            toValue: 0,
+            useNativeDriver: true,
+          }),
+          Animated.spring(translateYFullscreen, {
+            toValue: 0,
+            useNativeDriver: true,
+          }),
+        ]).start();
+        translateXFullscreen.setOffset(0);
+        translateYFullscreen.setOffset(0);
+        lastTranslateX.current = 0;
+        lastTranslateY.current = 0;
+      }
+    }
+  };
+
+  const onPanEvent = Animated.event(
+    [{ nativeEvent: { translationX: translateXFullscreen, translationY: translateYFullscreen } }],
+    {
+      useNativeDriver: true,
+      listener: () => {
+        if (lastScale.current <= 1) {
+          translateXFullscreen.setValue(0);
+          translateYFullscreen.setValue(0);
+        }
+      },
+    }
+  );
+
+  const onPanStateChange = (event: any) => {
+    if (lastScale.current <= 1) {
+      translateXFullscreen.setOffset(0);
+      translateYFullscreen.setOffset(0);
+      translateXFullscreen.setValue(0);
+      translateYFullscreen.setValue(0);
+      return;
+    }
+
+    if (event.nativeEvent.state === State.BEGAN) {
+      translateXFullscreen.setOffset(lastTranslateX.current);
+      translateXFullscreen.setValue(0);
+      translateYFullscreen.setOffset(lastTranslateY.current);
+      translateYFullscreen.setValue(0);
+    }
+
+    if (event.nativeEvent.state === State.END || event.nativeEvent.oldState === State.ACTIVE) {
+      lastTranslateX.current += event.nativeEvent.translationX;
+      lastTranslateY.current += event.nativeEvent.translationY;
+      translateXFullscreen.flattenOffset();
+      translateYFullscreen.flattenOffset();
+    }
+  };
+
+  const handleFullScreenDoubleTap = () => {
+    if (lastScale.current > 1) {
+      Animated.parallel([
+        Animated.spring(baseScale, {
+          toValue: 1,
+          useNativeDriver: true,
+        }),
+        Animated.spring(pinchScale, {
+          toValue: 1,
+          useNativeDriver: true,
+        }),
+        Animated.spring(translateXFullscreen, {
+          toValue: 0,
+          useNativeDriver: true,
+        }),
+        Animated.spring(translateYFullscreen, {
+          toValue: 0,
+          useNativeDriver: true,
+        }),
+      ]).start();
+      lastScale.current = 1;
+      lastTranslateX.current = 0;
+      lastTranslateY.current = 0;
+      translateXFullscreen.setOffset(0);
+      translateYFullscreen.setOffset(0);
+      translateXFullscreen.setValue(0);
+      translateYFullscreen.setValue(0);
+      setCurrentZoom(1);
+    } else {
+      Animated.parallel([
+        Animated.spring(baseScale, {
+          toValue: 2,
+          useNativeDriver: true,
+        }),
+        Animated.spring(pinchScale, {
+          toValue: 1,
+          useNativeDriver: true,
+        }),
+      ]).start();
+      translateXFullscreen.setOffset(0);
+      translateYFullscreen.setOffset(0);
+      translateXFullscreen.setValue(0);
+      translateYFullscreen.setValue(0);
+      lastScale.current = 2;
+      setCurrentZoom(2);
+    }
+  };
+
+  const openFullScreen = useCallback(
+    (type: 'image' | 'video', index: number) => {
+      setImageViewerIndex(index);
+      setFullScreenMediaType(type);
+      if (type === 'video') {
+        setIsFullScreenVideoPlaying(true);
+      } else {
+        resetFullScreenZoom();
+      }
+      setCurrentZoom(1);
+      setIsFullScreenVisible(true);
+    },
+    [resetFullScreenZoom]
+  );
+
+  const closeFullScreen = useCallback(() => {
+    setIsFullScreenVisible(false);
+    setIsFullScreenVideoPlaying(true);
+    resetFullScreenZoom();
+    setCurrentZoom(1);
+  }, [resetFullScreenZoom]);
   
   // Cache for processed image URLs to avoid repeated conversions
   const processedImageCache = useRef<{ [key: string]: string[] }>({});
@@ -152,6 +404,102 @@ const ProductDetailsBottomSheet: React.FC<ProductDetailsBottomSheetProps> = ({
   const snapPoints = useMemo(() => ['25%', '50%', '90%'], []);
 
   // Memoize the getUserPrice function to prevent unnecessary recalculations
+  // Helper function to add product directly to "All" collection
+  const addToAllCollection = async () => {
+    if (!userData?.id || !product?.id) {
+      console.log('No user ID or product ID, cannot add to collection');
+      return;
+    }
+
+    // Show toast immediately when heart is clicked
+    Toast.show({
+      type: 'success',
+      text1: 'Added to Wishlist',
+      text2: `${product.name} saved to All folder`,
+      position: 'top',
+      visibilityTime: 3000,
+    });
+
+    try {
+      // Get or create "All" collection
+      let allCollectionId = null;
+      const { data: existingAllCollection } = await supabase
+        .from('collections')
+        .select('id')
+        .eq('user_id', userData.id)
+        .eq('name', 'All')
+        .single();
+
+      if (existingAllCollection) {
+        allCollectionId = existingAllCollection.id;
+      } else {
+        // Create "All" collection
+        const { data: newCollection, error: createError } = await supabase
+          .from('collections')
+          .insert({
+            user_id: userData.id,
+            name: 'All',
+            is_private: false,
+          })
+          .select()
+          .single();
+
+        if (createError) {
+          console.error('Error creating All collection:', createError);
+          return;
+        }
+        allCollectionId = newCollection.id;
+      }
+
+      // Check if product already exists in "All" collection
+      const { data: existingProduct } = await supabase
+        .from('collection_products')
+        .select('id')
+        .eq('product_id', product.id)
+        .eq('collection_id', allCollectionId)
+        .single();
+
+      if (!existingProduct) {
+        // Add product to "All" collection
+        const { error: insertError } = await supabase
+          .from('collection_products')
+          .insert({
+            product_id: product.id,
+            collection_id: allCollectionId,
+          });
+
+        if (insertError) {
+          console.error('Error adding to All collection:', insertError);
+        } else {
+          console.log('Successfully added to All collection');
+          
+          // Add to wishlist context with complete product object
+          const wishlistProduct = {
+            id: product.id,
+            name: product.name,
+            description: product.description || '',
+            price: getUserPrice(product),
+            image_url: productImages[0] || '',
+            image_urls: productImages,
+            video_urls: product.video_urls || [],
+            featured_type: product.featured || '',
+            category: product.category,
+            stock_quantity: product.stock_quantity || 0,
+            variants: product.variants || [],
+          };
+          
+          await addToWishlist(wishlistProduct);
+          
+          // Toast already shown at the beginning
+        }
+      } else {
+        console.log('Product already in All collection');
+      }
+    } catch (error) {
+      console.error('Error in addToAllCollection:', error);
+    }
+  };
+
   const getUserPrice = useCallback((product: Product) => {
     console.log('💰 getUserPrice called - variants:', variants.length, 'product.variants:', product.variants?.length);
     
@@ -219,6 +567,17 @@ const ProductDetailsBottomSheet: React.FC<ProductDetailsBottomSheetProps> = ({
     return getUserPrice(product);
   }, [product, getUserPrice]);
 
+  const baseResellPrice = useMemo(() => {
+    if (selectedVariant?.price) return selectedVariant.price;
+    const pricedVariant = variants.find((v) => v.price);
+    if (pricedVariant?.price) return pricedVariant.price;
+    if (product?.variants && product.variants.length > 0) {
+      const productVariantWithPrice = product.variants.find((v) => v.price);
+      if (productVariantWithPrice?.price) return productVariantWithPrice.price;
+    }
+    return userPrice || 0;
+  }, [selectedVariant, variants, product?.variants, userPrice]);
+
   const totalStock = useMemo(() => {
     if (variants.length > 0) {
       return variants.reduce((sum, variant) => sum + variant.quantity, 0);
@@ -260,6 +619,7 @@ const ProductDetailsBottomSheet: React.FC<ProductDetailsBottomSheetProps> = ({
       fetchProductVariants();
       fetchReviews();
       processProductImages();
+      fetchSuggestedProducts();
     } else {
       console.log('📱 Closing ProductDetailsBottomSheet');
       bottomSheetRef.current?.close();
@@ -294,6 +654,50 @@ const ProductDetailsBottomSheet: React.FC<ProductDetailsBottomSheetProps> = ({
       console.error('Error fetching reviews:', error);
     } finally {
       setReviewsLoading(false);
+    }
+  };
+
+  // Fetch suggested products based on current product
+  const fetchSuggestedProducts = async () => {
+    if (!product?.id) return;
+    
+    try {
+      setSuggestionsLoading(true);
+      
+      // Fetch all products from the database (not filtered by category)
+      const { data, error } = await supabase
+        .from('products')
+        .select(`
+          id,
+          name,
+          image_urls,
+          vendor_name,
+          product_variants(
+            id, 
+            price, 
+            mrp_price, 
+            rsp_price, 
+            discount_percentage, 
+            image_urls
+          )
+        `)
+        .neq('id', product.id)
+        .eq('is_active', true)
+        .order('created_at', { ascending: false })
+        .limit(50); // Fetch 50 products to ensure variety
+
+      if (error) {
+        console.error('Error fetching suggested products:', error);
+        return;
+      }
+
+      console.log('📦 BottomSheet - Fetched suggested products:', data?.length || 0, 'products');
+
+      setSuggestedProducts(data || []);
+    } catch (error) {
+      console.error('Error fetching suggested products:', error);
+    } finally {
+      setSuggestionsLoading(false);
     }
   };
 
@@ -604,9 +1008,12 @@ const ProductDetailsBottomSheet: React.FC<ProductDetailsBottomSheetProps> = ({
       // Only show sizes since colors are optional now
       const sizes = [...new Map(variantsData.map(v => v.size).filter(Boolean).map(v => [v.id, v])).values()];
 
-      console.log('👕 Available sizes:', sizes.map(s => ({ id: s.id, name: s.name })));
+      // Sort sizes in ascending order (XS, S, M, L, XL, 2XL, etc.)
+      const sortedSizes = sortSizesAscending(sizes);
 
-      setAvailableSizes(sizes);
+      console.log('👕 Available sizes:', sortedSizes.map(s => ({ id: s.id, name: s.name })));
+
+      setAvailableSizes(sortedSizes);
 
       if (sizes.length > 0 && !selectedSize) {
         const userSizeVariant = sizes.find(s => s.name === userData?.size);
@@ -668,16 +1075,85 @@ const ProductDetailsBottomSheet: React.FC<ProductDetailsBottomSheetProps> = ({
     }
   };
 
-  const handleVirtualTryOn = async () => {
+  const handleTryOnButtonPress = () => {
+    if (!userData?.id) {
+      promptLoginForTryOn();
+      return;
+    }
+
+    if (availableSizes.length > 0) {
+      const preferredSize =
+        (selectedSize && availableSizes.find((size) => size.id === selectedSize)) ||
+        (tryOnSizeId && availableSizes.find((size) => size.id === tryOnSizeId)) ||
+        (userData?.size && availableSizes.find((size) => size.name === userData.size));
+      const initialSizeId = preferredSize?.id || availableSizes[0].id;
+      setSizeSelectionDraft(initialSizeId);
+      setSizeSelectionError('');
+      setShowSizeSelectionModal(true);
+    } else {
+      setSizeSelectionDraft(null);
+      setTryOnSizeId(null);
+      setSizeSelectionError('');
+      setShowConsentModal(true);
+    }
+  };
+
+  const handleConfirmSizeSelection = () => {
+    if (!sizeSelectionDraft) {
+      setSizeSelectionError('Please choose a size to continue.');
+      return;
+    }
+
+    setTryOnSizeId(sizeSelectionDraft);
+    setSelectedSize(sizeSelectionDraft);
+    setShowSizeSelectionModal(false);
+    setSizeSelectionError('');
+    setShowConsentModal(true);
+  };
+
+  const handleCancelSizeSelection = () => {
+    setShowSizeSelectionModal(false);
+    setSizeSelectionDraft(null);
+    setSizeSelectionError('');
+    setTryOnSizeId(null);
+  };
+
+  const handleConsentCancel = () => {
+    setShowConsentModal(false);
+    setTryOnSizeId(null);
+    setSizeSelectionDraft(null);
+  };
+
+  const handleConsentAgree = () => {
+    setShowConsentModal(false);
+    setShowTryOnModal(true);
+  };
+
+  const handleStartFaceSwap = () => {
+    const sizeId = tryOnSizeId || selectedSize || undefined;
+    handleVirtualTryOn(sizeId);
+  };
+
+  const handleVirtualTryOn = async (sizeId?: string) => {
+    if (!userData?.id) {
+      setShowTryOnModal(false);
+      promptLoginForTryOn();
+      return;
+    }
+
     // Ensure we have the latest profile state
     await refreshUserData?.();
-    if (!userData?.id || !userData?.profilePhoto) {
-      Alert.alert('Error', 'Please upload a profile photo first');
+    if (!userData?.profilePhoto) {
+      setShowTryOnModal(false);
+      setShowProfilePhotoModal(true);
+      setTryOnSizeId(null);
+      setSizeSelectionDraft(null);
+      setSizeSelectionError('');
       return;
     }
 
     if (coinBalance < 25) {
-      Alert.alert('Insufficient Coins', 'You need at least 25 coins for Virtual Try-On. Please purchase more coins.');
+      Alert.alert('Insufficient Coins', 'You need at least 25 coins for Face Swap. Please purchase more coins.');
       return;
     }
 
@@ -687,9 +1163,13 @@ const ProductDetailsBottomSheet: React.FC<ProductDetailsBottomSheetProps> = ({
       return;
     }
     
-    // Get image from first variant that has images, or fallback to product image_urls
+    const sizedVariant =
+      sizeId && variants.find((variant) => variant.size_id === sizeId && variant.image_urls?.length);
     const firstVariantWithImage = variants.find(v => v.image_urls && v.image_urls.length > 0);
-    const productImageUrl = firstVariantWithImage?.image_urls?.[0] || product?.image_urls?.[0];
+    const productImageUrl =
+      sizedVariant?.image_urls?.[0] ||
+      firstVariantWithImage?.image_urls?.[0] ||
+      product?.image_urls?.[0];
 
     if (!productImageUrl) {
       Alert.alert('Error', 'Product image not available');
@@ -699,7 +1179,7 @@ const ProductDetailsBottomSheet: React.FC<ProductDetailsBottomSheetProps> = ({
     setShowTryOnModal(false);
 
     try {
-      // Update coin balance (deduct 25 coins for virtual try-on)
+      // Update coin balance (deduct 25 coins for face swap)
       setCoinBalance(prev => prev - 25);
       
       // Also update user context
@@ -713,7 +1193,7 @@ const ProductDetailsBottomSheet: React.FC<ProductDetailsBottomSheetProps> = ({
         .update({ coin_balance: (userData?.coin_balance || 0) - 25 })
         .eq('id', userData?.id);
 
-      // Initiate virtual try-on with PiAPI
+      // Initiate face swap with PiAPI
       const response = await piAPIVirtualTryOnService.initiateVirtualTryOn({
         userImageUrl: userData.profilePhoto,
         productImageUrl: productImageUrl,
@@ -728,8 +1208,8 @@ const ProductDetailsBottomSheet: React.FC<ProductDetailsBottomSheetProps> = ({
           
         Toast.show({
           type: 'success',
-          text1: 'Virtual Try-On Started',
-          text2: 'Your virtual try-on is being processed. This may take a few minutes.',
+          text1: 'Face Swap Started',
+          text2: 'Your face swap is being processed. This may take a few minutes.',
         });
       } else {
         // Refund coins on failure
@@ -742,11 +1222,15 @@ const ProductDetailsBottomSheet: React.FC<ProductDetailsBottomSheetProps> = ({
           .update({ coin_balance: (userData?.coin_balance || 0) + 25 })
           .eq('id', userData?.id);
 
-        Alert.alert('Error', response.error || 'Failed to start virtual try-on');
+        Alert.alert('Error', response.error || 'Failed to start face swap');
       }
     } catch (error) {
-      console.error('Error starting virtual try-on:', error);
-      Alert.alert('Error', 'Failed to start virtual try-on. Please try again.');
+      console.error('Error starting face swap:', error);
+      Alert.alert('Error', 'Failed to start face swap. Please try again.');
+    } finally {
+      setTryOnSizeId(null);
+      setSizeSelectionDraft(null);
+      setSizeSelectionError('');
     }
   };
 
@@ -854,7 +1338,8 @@ const ProductDetailsBottomSheet: React.FC<ProductDetailsBottomSheetProps> = ({
       }
 
       const cartItem = {
-        id: product.id,
+        productId: product.id,
+        variantId: selectedVariantData?.id,
         name: product.name,
         price: price,
         image: getFirstSafeProductImage(product),
@@ -862,9 +1347,9 @@ const ProductDetailsBottomSheet: React.FC<ProductDetailsBottomSheetProps> = ({
         size: size,
         color: color,
         quantity: 1,
-        variant_id: selectedVariantData?.id || product.id,
         stock: product.stock_quantity,
-        sku: product.id,
+        sku: product.sku || product.id,
+        isReseller: false,
       };
 
       await addToCart(cartItem);
@@ -898,23 +1383,94 @@ const ProductDetailsBottomSheet: React.FC<ProductDetailsBottomSheetProps> = ({
     setShareModalVisible(false);
   };
 
-  const copyUrl = () => {
-    Clipboard.setString(shareUrl || '');
-    if (Platform.OS === 'android') ToastAndroid.show('Copied to clipboard', ToastAndroid.SHORT);
-    if (userData?.id && product?.id) {
-      akoolService.awardReferralCoins(userData.id, product.id, 'copy_link', 1).then((ok) => {
-        if (ok) {
-          Toast.show({ type: 'success', text1: t('coins_awarded') || 'Coins awarded', text2: '+1 coin for sharing link' });
-          setCoinBalance((prev) => prev + 1);
-        }
+  const handleResellPress = () => {
+    if (!userData?.id) {
+      Toast.show({
+        type: 'info',
+        text1: 'Login Required',
+        text2: 'Please login to resell products.',
       });
+      showLoginSheet();
+      return;
     }
-    setShareModalVisible(false);
+    setShowMarginModal(true);
   };
 
-  const handleImagePress = (index: number) => {
-    setCurrentImageIndex(index);
+  const closeMarginModal = () => {
+    setShowMarginModal(false);
+    setCustomPrice('');
+    setCustomPriceError(null);
   };
+
+  const computeEffectiveResellPrice = useCallback(() => {
+    const base = baseResellPrice || 0;
+    const customNum = Number(customPrice);
+    const useCustom = !!customPrice && !isNaN(customNum) && customNum >= base;
+    if (useCustom) return Math.round(customNum);
+    return Math.round(base * (1 + selectedMargin / 100));
+  }, [baseResellPrice, customPrice, selectedMargin]);
+
+  const handleResellContinue = () => {
+    if (!product) return;
+    const base = baseResellPrice;
+    if (!base || base <= 0) {
+      Toast.show({ type: 'error', text1: 'Price unavailable', text2: 'Unable to calculate base price.' });
+      return;
+    }
+    const resellPrice = computeEffectiveResellPrice();
+    const effectiveMarginPct = Math.round(((resellPrice - base) / base) * 100);
+
+    closeMarginModal();
+    onClose?.();
+    (navigation as any).navigate('CatalogShare', {
+      product: {
+        ...product,
+        variants,
+        product_variants: variants,
+        availableSizes,
+        resellPrice,
+        margin: effectiveMarginPct,
+        basePrice: base,
+      },
+    });
+  };
+
+  const scrollToMediaIndex = useCallback(
+    (targetIndex: number) => {
+      if (mediaItems.length === 0) return;
+      let nextIndex = targetIndex;
+      if (targetIndex < 0) {
+        nextIndex = mediaItems.length - 1;
+      } else if (targetIndex >= mediaItems.length) {
+        nextIndex = 0;
+      }
+      setCurrentImageIndex(nextIndex);
+      mediaListRef.current?.scrollToIndex?.({ index: nextIndex, animated: true });
+    },
+    [mediaItems.length]
+  );
+
+  const handleMediaScroll = useCallback(
+    (event: any) => {
+      const { contentOffset, layoutMeasurement } = event.nativeEvent;
+      if (!layoutMeasurement?.width) return;
+      const index = Math.round(contentOffset.x / layoutMeasurement.width);
+      if (index !== currentImageIndex) {
+        setCurrentImageIndex(index);
+      }
+    },
+    [currentImageIndex]
+  );
+
+  const handleImagePress = (index: number) => {
+    scrollToMediaIndex(index);
+  };
+
+  const handleScrollToIndexFailed = useCallback((info: { index: number }) => {
+    requestAnimationFrame(() => {
+      mediaListRef.current?.scrollToIndex?.({ index: info.index, animated: true });
+    });
+  }, []);
 
   // Video control functions
   const togglePlay = (index: number) => {
@@ -965,89 +1521,101 @@ const ProductDetailsBottomSheet: React.FC<ProductDetailsBottomSheetProps> = ({
     }
 
     const currentMedia = mediaItems[currentImageIndex];
-    const videoState = videoStates[currentImageIndex] || { isPlaying: true, isMuted: false };
 
-    return (
-      <View style={styles.imageContainer}>
-        {/* Main Media (Image or Video) */}
-        {currentMedia.type === 'video' ? (
+    const renderMediaItem = ({ item, index }: { item: MediaItem; index: number }) => {
+      const videoState = videoStates[index] || { isPlaying: true, isMuted: false };
+      const isActive = index === currentImageIndex;
+
+      if (item.type === 'video') {
+        return (
           <TouchableOpacity
+            key={`${item.url}-${index}`}
             activeOpacity={1}
-            style={styles.videoContainer}
-            onPress={() => handleVideoTap(currentImageIndex)}
+            style={styles.mediaSlide}
+            onPress={() => handleVideoTap(index)}
           >
             <Video
-              ref={ref => { if (ref) videoRefs.current[currentImageIndex] = ref; }}
-              source={{ uri: currentMedia.url }}
+              ref={(ref) => {
+                if (ref) videoRefs.current[index] = ref;
+              }}
+              source={{ uri: item.url }}
               style={styles.videoBackground}
               resizeMode={ResizeMode.COVER}
-              shouldPlay={videoState.isPlaying}
+              shouldPlay={isActive && videoState.isPlaying}
               isLooping
               isMuted={videoState.isMuted}
-              posterSource={{ uri: currentMedia.thumbnail }}
+              posterSource={{ uri: item.thumbnail }}
               posterStyle={{ resizeMode: 'cover' }}
               usePoster
               onError={(error) => {
-                console.error('❌ Video error for index:', currentImageIndex, error);
-                console.error('❌ Video URL:', currentMedia.url);
+                console.error('❌ Video error for index:', index, error);
+                console.error('❌ Video URL:', item.url);
               }}
               onLoad={() => {
-                console.log('✅ Video loaded for index:', currentImageIndex);
-                console.log('✅ Video URL:', currentMedia.url);
+                console.log('✅ Video loaded for index:', index);
+                console.log('✅ Video URL:', item.url);
               }}
             />
-            
-            {/* Video Controls Overlay */}
+
             <View style={styles.videoControlsOverlay}>
-              <TouchableOpacity 
-                style={styles.videoControlButton}
-                onPress={() => togglePlay(currentImageIndex)}
-              >
-                <Ionicons 
-                  name={videoState.isPlaying ? 'pause' : 'play'} 
-                  size={24} 
-                  color="#fff" 
-                />
+              <TouchableOpacity style={styles.videoControlButton} onPress={() => togglePlay(index)}>
+                <Ionicons name={videoState.isPlaying ? 'pause' : 'play'} size={24} color="#fff" />
               </TouchableOpacity>
-              <TouchableOpacity 
-                style={styles.videoControlButton}
-                onPress={() => toggleMute(currentImageIndex)}
-              >
-                <Ionicons 
-                  name={videoState.isMuted ? 'volume-mute' : 'volume-high'} 
-                  size={24} 
-                  color="#fff" 
-                />
+              <TouchableOpacity style={styles.videoControlButton} onPress={() => toggleMute(index)}>
+                <Ionicons name={videoState.isMuted ? 'volume-mute' : 'volume-high'} size={24} color="#fff" />
               </TouchableOpacity>
             </View>
           </TouchableOpacity>
-        ) : (
-          <>
-            <Image 
-              source={{ uri: currentMedia.url }} 
-              style={styles.productImage}
-              resizeMode="cover"
-              fadeDuration={0}
-              onLoadStart={() => setImageLoadingStates(prev => ({ ...prev, [currentImageIndex]: true }))}
-              onLoad={() => setImageLoadingStates(prev => ({ ...prev, [currentImageIndex]: false }))}
-              onError={() => setImageLoadingStates(prev => ({ ...prev, [currentImageIndex]: false }))}
-            />
-            
-            {/* Loading Indicator for Images */}
-            {imageLoadingStates[currentImageIndex] && (
-              <View style={styles.imageLoadingOverlay}>
-                <ActivityIndicator size="large" color="#F53F7A" />
-              </View>
-            )}
-          </>
-        )}
-        
+        );
+      }
+
+      return (
+        <TouchableOpacity
+          key={`${item.url}-${index}`}
+          style={styles.mediaSlide}
+          activeOpacity={0.95}
+          onPress={() => openFullScreen('image', index)}
+        >
+          <Image
+            source={{ uri: item.url }}
+            style={styles.productImage}
+            resizeMode="cover"
+            fadeDuration={0}
+            onLoadStart={() => setImageLoadingStates((prev) => ({ ...prev, [index]: true }))}
+            onLoad={() => setImageLoadingStates((prev) => ({ ...prev, [index]: false }))}
+            onError={() => setImageLoadingStates((prev) => ({ ...prev, [index]: false }))}
+          />
+          {imageLoadingStates[index] && (
+            <View style={styles.imageLoadingOverlay}>
+              <ActivityIndicator size="large" color="#F53F7A" />
+            </View>
+          )}
+        </TouchableOpacity>
+      );
+    };
+
+    return (
+      <View style={styles.imageContainer}>
+        <FlatList
+          ref={mediaListRef}
+          data={mediaItems}
+          keyExtractor={(item, index) => `${item.url}-${index}`}
+          renderItem={renderMediaItem}
+          horizontal
+          pagingEnabled
+          showsHorizontalScrollIndicator={false}
+          onMomentumScrollEnd={handleMediaScroll}
+          getItemLayout={(_, index) => ({ length: width, offset: width * index, index })}
+          extraData={{ currentImageIndex, videoStates, imageLoadingStates }}
+          onScrollToIndexFailed={handleScrollToIndexFailed}
+        />
+
         {/* Navigation Arrows */}
         {mediaItems.length > 1 && (
           <>
             <TouchableOpacity 
               style={[styles.navArrow, styles.leftArrow]} 
-              onPress={() => setCurrentImageIndex(prev => prev > 0 ? prev - 1 : mediaItems.length - 1)}
+              onPress={() => scrollToMediaIndex(currentImageIndex - 1)}
               disabled={currentImageIndex === 0}
               activeOpacity={0.7}
               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
@@ -1056,7 +1624,7 @@ const ProductDetailsBottomSheet: React.FC<ProductDetailsBottomSheetProps> = ({
             </TouchableOpacity>
             <TouchableOpacity 
               style={[styles.navArrow, styles.rightArrow]} 
-              onPress={() => setCurrentImageIndex(prev => prev < mediaItems.length - 1 ? prev + 1 : 0)}
+              onPress={() => scrollToMediaIndex(currentImageIndex + 1)}
               disabled={currentImageIndex === mediaItems.length - 1}
               activeOpacity={0.7}
               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
@@ -1097,33 +1665,55 @@ const ProductDetailsBottomSheet: React.FC<ProductDetailsBottomSheetProps> = ({
           </View>
         )}
         
+        {/* Full View Button */}
+        <TouchableOpacity
+          style={styles.fullViewButton}
+          onPress={() => openFullScreen(currentMedia.type, currentImageIndex)}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="search-outline" size={20} color="#333" />
+        </TouchableOpacity>
+
         {/* Wishlist Icon */}
         <TouchableOpacity 
           style={styles.wishlistButton} 
           onPress={async () => {
             if (isInWishlist(product.id)) {
-              removeFromWishlist(product.id);
-              // Remove from all collections in Supabase
-              if (userData?.id) {
-                await supabase
-                  .from('collection_products')
-                  .delete()
-                  .match({ product_id: product.id });
+              // Show collection sheet in parent to manually remove from collections
+              if (onShowCollectionSheet) {
+                onShowCollectionSheet({
+                  id: product.id,
+                  name: product.name,
+                  description: product.description,
+                  price: getUserPrice(product),
+                  image_urls: productImages,
+                  video_urls: product.video_urls || [],
+                  featured_type: product.featured || undefined,
+                  category: product.category,
+                  stock_quantity: product.stock_quantity,
+                  variants: product.variants,
+                });
               }
             } else {
-              setSelectedProduct({
-                id: product.id,
-                name: product.name,
-                description: product.description,
-                price: getUserPrice(product),
-                image_urls: productImages,
-                video_urls: product.video_urls || [],
-                featured_type: product.featured || undefined,
-                category: product.category,
-                stock_quantity: product.stock_quantity,
-                variants: product.variants,
-              });
-              setShowCollectionSheet(true);
+              // Add to "All" collection first
+              await addToAllCollection();
+              // Then show collection sheet to optionally add to other folders
+              if (onShowCollectionSheet) {
+                setTimeout(() => {
+                  onShowCollectionSheet({
+                    id: product.id,
+                    name: product.name,
+                    description: product.description,
+                    price: getUserPrice(product),
+                    image_urls: productImages,
+                    video_urls: product.video_urls || [],
+                    featured_type: product.featured || undefined,
+                    category: product.category,
+                    stock_quantity: product.stock_quantity,
+                    variants: product.variants,
+                  });
+                }, 500);
+              }
             }
           }}
           activeOpacity={0.7}
@@ -1172,6 +1762,7 @@ const ProductDetailsBottomSheet: React.FC<ProductDetailsBottomSheetProps> = ({
   if (!product) return null;
 
   return (
+    <>
     <BottomSheet
       ref={bottomSheetRef}
       index={visible ? 0 : -1}
@@ -1204,7 +1795,7 @@ const ProductDetailsBottomSheet: React.FC<ProductDetailsBottomSheetProps> = ({
           </TouchableOpacity>
         </View>
 
-        <BottomSheetScrollView style={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        <BottomSheetScrollView style={styles.scrollContent} showsVerticalScrollIndicator={false} nestedScrollEnabled={true}>
           {/* Image Gallery */}
           {renderImageGallery()}
 
@@ -1335,26 +1926,137 @@ const ProductDetailsBottomSheet: React.FC<ProductDetailsBottomSheetProps> = ({
               </View>
             )}
           </View>
-          <View style={styles.bottomBar}>
-          <TouchableOpacity
-            style={styles.tryOnButton}
-            onPress={() => {
-              // Now supports both image and video face swap
-              setShowTryOnModal(true);
-            }}
-          >
-            <Ionicons name="camera" size={20} color="#F53F7A" />
-            <Text style={styles.tryOnButtonText}>{t('try_on')}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.addToCartButton, { opacity: availableQuantity === 0 ? 0.5 : 1 }]}
-            onPress={handleAddToCart}
-            disabled={availableQuantity === 0 || addToCartLoading}
-          >
-            <Ionicons name="cart-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
-            <Text style={styles.addToCartButtonText}>{addToCartLoading ? t('adding') : t('add_to_cart')}</Text>
-          </TouchableOpacity>
+        <View style={styles.bottomBar}>
+          <View style={styles.bottomTopRow}>
+            <TouchableOpacity
+              style={styles.tryOnButton}
+              onPress={handleTryOnButtonPress}
+            >
+              <Ionicons name="camera" size={20} color="#F53F7A" style={{ marginRight: 8 }} />
+              <Text style={styles.tryOnButtonText}>{t('try_on')}</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.addToCartButton, { opacity: availableQuantity === 0 ? 0.5 : 1 }]}
+              onPress={handleAddToCart}
+              disabled={availableQuantity === 0 || addToCartLoading}
+            >
+              <Ionicons name="cart-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
+              <Text style={styles.addToCartButtonText}>
+                {addToCartLoading ? t('adding') : t('add_to_cart')}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {userData?.id && (
+            <TouchableOpacity
+              style={styles.resellButtonFull}
+              onPress={handleResellPress}
+            >
+              <Ionicons name="storefront" size={20} color="#fff" style={{ marginRight: 8 }} />
+              <Text style={styles.resellButtonFullText}>Resell</Text>
+            </TouchableOpacity>
+          )}
         </View>
+
+        {/* More Like This Section */}
+        {suggestedProducts.length > 0 && (
+          <View style={styles.moreLikeThisContainer}>
+            <View style={styles.moreLikeThisHeader}>
+              <Text style={styles.moreLikeThisTitle}>More Like This</Text>
+              {suggestedProducts.length > 10 && (
+                <TouchableOpacity
+                  onPress={() => {
+                    // Close bottom sheet and navigate to Products screen
+                    onClose();
+                    // Note: Navigation would need to be passed as prop for this to work
+                  }}
+                >
+                  <Text style={styles.seeMoreText}>See More</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+            <View style={styles.suggestionsWrapper}>
+              <ScrollView 
+                horizontal 
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.suggestionsListContent}
+                style={styles.suggestionsScrollView}
+                nestedScrollEnabled={true}
+              >
+              {suggestedProducts.slice(0, 10).map((p: any) => {
+                const variants = p.product_variants || [];
+                const firstVariant = variants[0];
+                const img = (firstVariant?.image_urls && firstVariant.image_urls[0]) || (p.image_urls && p.image_urls[0]);
+                
+                // Calculate MRP, RSP, and discount from variants (same logic as Cart)
+                const mrpPrices = variants
+                  .map((v: any) => v.mrp_price)
+                  .filter((price: any) => price != null && price > 0);
+                const rspPrices = variants
+                  .map((v: any) => v.rsp_price || v.price)
+                  .filter((price: any) => price != null && price > 0);
+                const discounts = variants
+                  .map((v: any) => v.discount_percentage)
+                  .filter((d: any) => d != null && d > 0);
+                
+                const minMrpPrice = mrpPrices.length > 0 ? Math.min(...mrpPrices) : 0;
+                const minRspPrice = rspPrices.length > 0 ? Math.min(...rspPrices) : (firstVariant?.price || 0);
+                const maxDiscountPercentage = discounts.length > 0 ? Math.max(...discounts) : 0;
+                
+                const calculatedDiscount = maxDiscountPercentage > 0
+                  ? maxDiscountPercentage
+                  : minMrpPrice > 0 && minRspPrice > 0 && minMrpPrice > minRspPrice
+                  ? Math.round(((minMrpPrice - minRspPrice) / minMrpPrice) * 100)
+                  : 0;
+                
+                return (
+                  <View key={p.id || Math.random()} style={styles.suggestionCard}>
+                    <TouchableOpacity
+                      onPress={() => {
+                        // Close current bottom sheet and navigate to ProductDetails screen
+                        onClose();
+                        setTimeout(() => {
+                          navigation.navigate('ProductDetails', { productId: p.id });
+                        }, 300);
+                      }}
+                      activeOpacity={0.9}>
+                      <Image
+                        source={{ uri: img || 'https://via.placeholder.com/160x160.png?text=Only2U' }}
+                        style={styles.suggestionImage}
+                      />
+                      <View style={styles.suggestionInfo}>
+                        <Text style={styles.suggestionProductName} numberOfLines={2}>
+                          {p.name}
+                        </Text>
+                        <View style={styles.suggestionPriceContainer}>
+                          {minMrpPrice > 0 && minMrpPrice > minRspPrice && (
+                            <Text style={styles.suggestionOriginalPrice}>₹{Math.round(minMrpPrice)}</Text>
+                          )}
+                          <Text style={styles.suggestionPrice}>₹{Math.round(minRspPrice)}</Text>
+                          {calculatedDiscount > 0 && (
+                            <Text style={styles.suggestionDiscountBadge}>{calculatedDiscount}% OFF</Text>
+                          )}
+                        </View>
+                      </View>
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                      style={styles.suggestionAddButton}
+                      onPress={() => {
+                        // Add to cart functionality would go here
+                        Alert.alert('Added!', `${p.name} added to cart`, [{ text: 'OK' }]);
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons name="add" size={18} color="#fff" />
+                    </TouchableOpacity>
+                  </View>
+                );
+              })}
+              </ScrollView>
+            </View>
+          </View>
+        )}
         </BottomSheetScrollView>
       </View>
       
@@ -1388,61 +2090,163 @@ const ProductDetailsBottomSheet: React.FC<ProductDetailsBottomSheetProps> = ({
 
       {/* Try On Modal */}
       {showTryOnModal && (
-        <View style={{ ...StyleSheet.absoluteFillObject, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.3)', zIndex: 9999 }}>
+        <View
+          style={{
+            ...StyleSheet.absoluteFillObject,
+            justifyContent: 'center',
+            alignItems: 'center',
+            backgroundColor: 'rgba(0,0,0,0.3)',
+            zIndex: 9999,
+          }}
+        >
           <View style={styles.akoolModal}>
-            <TouchableOpacity style={styles.closeButton} onPress={() => setShowTryOnModal(false)}>
+            <TouchableOpacity
+              style={styles.closeButton}
+              onPress={() => {
+                setShowTryOnModal(false);
+                setTryOnSizeId(null);
+              }}
+            >
               <Ionicons name="close" size={24} color="#333" />
             </TouchableOpacity>
             <Text style={styles.akoolTitle}>👗 Want to see how this outfit looks on you?</Text>
-            <Text style={styles.akoolSubtitle}>Try on with Only2U Virtual Try-On AI</Text>
-            <View style={styles.akoolOptions}>
-              <TouchableOpacity
-                style={[styles.akoolOption, selectedOption === 'photo' && styles.akoolOptionSelected]}
-                onPress={() => setSelectedOption('photo')}
-              >
-                <View style={styles.radioCircle}>
-                  {selectedOption === 'photo' && <View style={styles.radioDot} />}
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.akoolOptionTitle}>Virtual Try-On <Text style={styles.akoolCoin}>25 {t('coins')}</Text></Text>
-                  <Text style={styles.akoolOptionDesc}>See how this outfit looks on you</Text>
-                </View>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.akoolOption, selectedOption === 'video' && styles.akoolOptionSelected]}
-                onPress={() => setSelectedOption('video')}
-              >
-                <View style={styles.radioCircle}>
-                  {selectedOption === 'video' && <View style={styles.radioDot} />}
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.akoolOptionTitle}>{t('video_preview')} <Text style={styles.akoolCoin}>35 {t('coins')}</Text></Text>
-                  <Text style={styles.akoolOptionDesc}>{t('get_short_hd_reel')}</Text>
-                </View>
-              </TouchableOpacity>
+            <Text style={styles.akoolSubtitle}>Try on with Only2U Face Swap AI</Text>
+            <View style={styles.tryOnInfoCard}>
+              <View style={styles.tryOnInfoHeader}>
+                <Ionicons name="sparkles" size={20} color="#F53F7A" />
+                <Text style={styles.tryOnInfoTitle}>Photo Face Swap</Text>
+              </View>
+              <Text style={styles.tryOnInfoDesc}>
+                See how this outfit looks on you with AI-powered face swap
+              </Text>
+              {selectedTryOnSizeName && (
+                <Text style={styles.tryOnInfoDesc}>
+                  Preview size: {selectedTryOnSizeName}
+                </Text>
+              )}
+              <View style={styles.tryOnInfoCost}>
+                <Ionicons name="diamond-outline" size={16} color="#F53F7A" />
+                <Text style={styles.tryOnInfoCostText}>25 coins</Text>
+              </View>
             </View>
-            <Text style={styles.akoolBalance}>{t('available_balance')}: <Text style={{ color: '#F53F7A', fontWeight: 'bold' }}>{coinBalance} {t('coins')}</Text></Text>
-            <TouchableOpacity 
-              style={styles.akoolContinueBtn} 
-              onPress={() => {
-                if (selectedOption === 'photo') {
-                  // Show initial success message
-                  Toast.show({
-                    type: 'success',
-                    text1: 'Virtual Try-On Started',
-                    text2: 'We will notify you once your try-on is ready',
-                  });
-                  
-                  // Perform virtual try-on directly
-                  handleVirtualTryOn();
-                }
-              }}
-            >
-              <Text style={styles.akoolContinueText}>Continue</Text>
+            <Text style={styles.akoolBalance}>
+              {t('available_balance')}:{' '}
+              <Text style={{ color: '#F53F7A', fontWeight: 'bold' }}>
+                {coinBalance} {t('coins')}
+              </Text>
+            </Text>
+            <TouchableOpacity style={styles.akoolContinueBtn} onPress={handleStartFaceSwap}>
+              <Text style={styles.akoolContinueText}>Start Face Swap</Text>
             </TouchableOpacity>
           </View>
         </View>
       )}
+
+      {/* Consent Modal */}
+      {showConsentModal && (
+        <Modal
+          transparent
+          animationType="fade"
+          visible={showConsentModal}
+          onRequestClose={handleConsentCancel}
+        >
+          <View style={styles.consentOverlay}>
+            <View style={styles.consentModal}>
+              <View style={styles.consentIconCircle}>
+                <Ionicons name="shield-checkmark" size={40} color="#F53F7A" />
+              </View>
+              <Text style={styles.consentTitle}>Privacy & Consent</Text>
+              <View style={styles.consentContent}>
+                <View style={styles.consentPoint}>
+                  <View style={styles.consentBullet}>
+                    <Ionicons name="checkmark-circle" size={20} color="#10B981" />
+                  </View>
+                  <Text style={styles.consentPointText}>I have the right to use this photo</Text>
+                </View>
+                <View style={styles.consentPoint}>
+                  <View style={styles.consentBullet}>
+                    <Ionicons name="checkmark-circle" size={20} color="#10B981" />
+                  </View>
+                  <Text style={styles.consentPointText}>I consent to AI processing for face swap</Text>
+                </View>
+                <View style={styles.consentPoint}>
+                  <View style={styles.consentBullet}>
+                    <Ionicons name="checkmark-circle" size={20} color="#10B981" />
+                  </View>
+                    <Text style={styles.consentPointText}>
+                      Generated previews may be stored to improve my experience
+                    </Text>
+                </View>
+              </View>
+              <View style={styles.consentButtons}>
+                <TouchableOpacity style={styles.consentCancelButton} onPress={handleConsentCancel}>
+                  <Text style={styles.consentCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.consentAgreeButton} onPress={handleConsentAgree}>
+                  <Ionicons name="checkmark-circle" size={18} color="#fff" style={{ marginRight: 6 }} />
+                  <Text style={styles.consentAgreeText}>I Agree</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
+
+      {/* Size Selection Modal */}
+      <Modal
+        visible={showSizeSelectionModal}
+        transparent
+        animationType="fade"
+        onRequestClose={handleCancelSizeSelection}
+      >
+        <View style={styles.sizeModalOverlay}>
+          <View style={styles.sizeModalContainer}>
+            <View style={styles.sizeModalHeader}>
+              <Text style={styles.sizeModalTitle}>Select Your Size</Text>
+              <TouchableOpacity style={styles.sizeModalCloseButton} onPress={handleCancelSizeSelection}>
+                <Ionicons name="close" size={20} color="#1C1C1E" />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.sizeModalSubtitle}>
+              Choose the size you want to preview before running Face Swap.
+            </Text>
+            <View style={styles.sizeOptionsWrap}>
+              {availableSizes.map((size) => {
+                const isSelected = sizeSelectionDraft === size.id;
+                return (
+                  <TouchableOpacity
+                    key={`modal-size-${size.id}`}
+                    style={[
+                      styles.sizeOptionChip,
+                      isSelected && styles.sizeOptionChipSelected,
+                    ]}
+                    onPress={() => {
+                      setSizeSelectionDraft(size.id);
+                      setSizeSelectionError('');
+                    }}
+                    activeOpacity={0.8}
+                  >
+                    <Text
+                      style={[
+                        styles.sizeOptionChipText,
+                        isSelected && styles.sizeOptionChipTextSelected,
+                      ]}
+                    >
+                      {size.name}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            {!!sizeSelectionError && (
+              <Text style={styles.sizeSelectionError}>{sizeSelectionError}</Text>
+            )}
+            <TouchableOpacity style={styles.sizeModalConfirmButton} onPress={handleConfirmSizeSelection}>
+              <Text style={styles.sizeModalConfirmText}>Continue</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
       
       {/* SaveToCollectionSheet */}
       <SaveToCollectionSheet
@@ -1453,6 +2257,124 @@ const ProductDetailsBottomSheet: React.FC<ProductDetailsBottomSheetProps> = ({
           setSelectedProduct(null);
         }}
       />
+
+      {showMarginModal && (
+        <View style={styles.marginModalOverlay}>
+          <View style={styles.marginModal}>
+            <TouchableOpacity
+              style={styles.modalCloseButton}
+              onPress={closeMarginModal}>
+              <Ionicons name="close" size={24} color="#333" />
+            </TouchableOpacity>
+
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              nestedScrollEnabled
+              style={styles.marginScroll}
+              contentContainerStyle={{ paddingBottom: 24 }}
+            >
+              <Text style={styles.marginModalTitle}>💰 Set Your Margin</Text>
+              <Text style={styles.marginModalSubtitle}>
+                Choose your profit margin for this product
+              </Text>
+
+              <View style={styles.marginOptions}>
+                {[10, 15, 20, 25, 30].map((margin) => (
+                  <TouchableOpacity
+                    key={margin}
+                    style={[
+                      styles.marginOption,
+                      selectedMargin === margin && styles.marginOptionSelected,
+                    ]}
+                    onPress={() => setSelectedMargin(margin)}>
+                    <View style={styles.radioCircle}>
+                      {selectedMargin === margin && <View style={styles.radioDot} />}
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.marginOptionTitle}>{margin}% Margin</Text>
+                      <Text style={styles.marginOptionDesc}>
+                        Sell at ₹{Math.round((baseResellPrice || 0) * (1 + margin / 100))}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <View style={styles.customPriceContainer}>
+                <Text style={styles.customPriceLabel}>Or enter a custom price</Text>
+                <View style={styles.customPriceRow}>
+                  <Text style={styles.customCurrency}>₹</Text>
+                  <TextInput
+                    value={customPrice}
+                    onChangeText={(val) => {
+                      setCustomPrice(val);
+                      const base = baseResellPrice || 0;
+                      const num = Number(val);
+                      if (!val) {
+                        setCustomPriceError(null);
+                      } else if (isNaN(num)) {
+                        setCustomPriceError('Enter a valid number');
+                      } else if (num < base) {
+                        setCustomPriceError(`Must be ≥ ₹${base}`);
+                      } else {
+                        setCustomPriceError(null);
+                      }
+                    }}
+                    placeholder={`${baseResellPrice || 0}`}
+                    placeholderTextColor="#999"
+                    keyboardType="numeric"
+                    style={styles.customPriceInput}
+                  />
+                </View>
+                {!!customPriceError && <Text style={styles.customPriceError}>{customPriceError}</Text>}
+                <Text style={styles.customPriceHelp}>Leave empty to use selected margin</Text>
+              </View>
+
+              <View style={styles.marginSummary}>
+                <Text style={styles.marginSummaryTitle}>Profit Summary</Text>
+                {(() => {
+                  const base = baseResellPrice || 0;
+                  const resellPrice = computeEffectiveResellPrice();
+                  const effectiveMarginPct = base > 0 ? Math.round(((resellPrice - base) / base) * 100) : 0;
+                  const effectiveProfit = base > 0 ? Math.round(resellPrice - base) : 0;
+                  return (
+                    <>
+                      <View style={styles.marginSummaryRow}>
+                        <Text style={styles.marginSummaryLabel}>Base Price:</Text>
+                        <Text style={styles.marginSummaryValue}>
+                          ₹{base}
+                        </Text>
+                      </View>
+                      <View style={styles.marginSummaryRow}>
+                        <Text style={styles.marginSummaryLabel}>Your Margin:</Text>
+                        <Text style={styles.marginSummaryValue}>{effectiveMarginPct}%</Text>
+                      </View>
+                      <View style={styles.marginSummaryRow}>
+                        <Text style={styles.marginSummaryLabel}>Your Price:</Text>
+                        <Text style={[styles.marginSummaryValue, styles.marginSummaryHighlight]}>
+                          ₹{resellPrice}
+                        </Text>
+                      </View>
+                      <View style={styles.marginSummaryRow}>
+                        <Text style={styles.marginSummaryLabel}>Your Profit:</Text>
+                        <Text style={[styles.marginSummaryValue, styles.marginSummaryProfit]}>
+                          ₹{effectiveProfit}
+                        </Text>
+                      </View>
+                    </>
+                  );
+                })()}
+              </View>
+
+              <TouchableOpacity
+                style={styles.marginContinueBtn}
+                onPress={handleResellContinue}>
+                <Text style={styles.marginContinueText}>Continue to Share</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      )}
 
 {shareModalVisible && (
         <View style={{ ...StyleSheet.absoluteFillObject, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.3)', zIndex: 9999 }}>
@@ -1470,15 +2392,143 @@ const ProductDetailsBottomSheet: React.FC<ProductDetailsBottomSheetProps> = ({
               />
               <Text style={styles.shareModalText}>{t('share_on_whatsapp')}</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.shareModalOption} onPress={copyUrl}>
-              <Ionicons name="copy-outline" size={22} color="#333" style={{ marginRight: 10 }} />
-              <Text style={styles.shareModalText}>{t('copy_url')}</Text>
-            </TouchableOpacity>
           </View>
           </View>
         </View>
       )}
     </BottomSheet>
+
+    <Modal
+      visible={isFullScreenVisible}
+      animationType="fade"
+      transparent={false}
+      onRequestClose={closeFullScreen}
+      presentationStyle="fullScreen"
+    >
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <View style={styles.fullscreenContainer}>
+          <StatusBar barStyle="light-content" backgroundColor="#000" />
+          <View style={styles.fullscreenSafeArea}>
+            <View style={styles.fullscreenHeader}>
+              <TouchableOpacity onPress={closeFullScreen} style={styles.fullscreenCloseButton}>
+                <Ionicons name="close" size={26} color="#fff" />
+              </TouchableOpacity>
+              <Text style={styles.fullscreenTitle}>Preview</Text>
+              <View style={styles.fullscreenHeaderAction}>
+                {fullScreenMediaType === 'video' ? (
+                  <TouchableOpacity
+                    onPress={() => setIsFullScreenVideoPlaying((prev) => !prev)}
+                    style={styles.fullscreenControlButton}
+                  >
+                    <Ionicons
+                      name={isFullScreenVideoPlaying ? 'pause' : 'play'}
+                      size={22}
+                      color="#fff"
+                    />
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity onPress={resetFullScreenZoom} style={styles.fullscreenControlButton}>
+                    <Ionicons name="refresh" size={22} color="#fff" />
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+
+            <View style={styles.fullscreenContent}>
+              {fullScreenMediaType === 'video' && mediaItems[imageViewerIndex]?.type === 'video' ? (
+                <TouchableOpacity
+                  activeOpacity={1}
+                  onPress={() => setIsFullScreenVideoPlaying((prev) => !prev)}
+                  style={styles.fullscreenMedia}
+                >
+                  <Video
+                    source={{ uri: mediaItems[imageViewerIndex]?.url }}
+                    style={styles.fullscreenMedia}
+                    resizeMode={ResizeMode.CONTAIN}
+                    shouldPlay={isFullScreenVideoPlaying}
+                    useNativeControls
+                    isLooping
+                  />
+                </TouchableOpacity>
+              ) : (
+                <PanGestureHandler
+                  onGestureEvent={onPanEvent}
+                  onHandlerStateChange={onPanStateChange}
+                  minPointers={1}
+                  maxPointers={1}
+                  avgTouches
+                >
+                  <Animated.View style={styles.fullscreenMedia}>
+                    <PinchGestureHandler
+                      onGestureEvent={onPinchEvent}
+                      onHandlerStateChange={onPinchStateChange}
+                    >
+                      <Animated.View style={styles.fullscreenMedia}>
+                        <TouchableOpacity
+                          activeOpacity={1}
+                          onPress={handleFullScreenDoubleTap}
+                          style={styles.fullscreenMedia}
+                        >
+                          <Animated.Image
+                            source={{ uri: mediaItems[imageViewerIndex]?.url }}
+                            style={[
+                              styles.fullscreenMedia,
+                              {
+                                transform: [
+                                  { scale: combinedScale },
+                                  { translateX: translateXFullscreen },
+                                  { translateY: translateYFullscreen },
+                                ],
+                              },
+                            ]}
+                            resizeMode="contain"
+                          />
+                        </TouchableOpacity>
+                        <View style={styles.fullscreenHint}>
+                          <Ionicons name="hand-left-outline" size={16} color="#fff" />
+                          <Text style={styles.fullscreenHintText}>Pinch & drag to explore</Text>
+                        </View>
+                        {currentZoom > 1 && (
+                          <View style={styles.zoomIndicator}>
+                            <Ionicons name="expand-outline" size={16} color="#fff" />
+                            <Text style={styles.zoomIndicatorText}>{currentZoom.toFixed(1)}x</Text>
+                          </View>
+                        )}
+                      </Animated.View>
+                    </PinchGestureHandler>
+                  </Animated.View>
+                </PanGestureHandler>
+              )}
+            </View>
+          </View>
+        </View>
+      </GestureHandlerRootView>
+    </Modal>
+    <ProfilePhotoRequiredModal
+      visible={showProfilePhotoModal}
+      title="Profile Photo Required"
+      description="Upload a profile photo to unlock Face Swap and see outfits on you."
+      dismissLabel="Maybe Later"
+      uploadLabel="Upload Photo"
+      onDismiss={() => {
+        setShowProfilePhotoModal(false);
+        setShowConsentModal(false);
+        setShowTryOnModal(false);
+        setSizeSelectionDraft(null);
+        setSizeSelectionError('');
+        setTryOnSizeId(null);
+      }}
+      onUpload={() => {
+        setShowProfilePhotoModal(false);
+        setShowConsentModal(false);
+        setShowTryOnModal(false);
+        setSizeSelectionDraft(null);
+        setSizeSelectionError('');
+        setTryOnSizeId(null);
+        (navigation as any).navigate('ProfilePictureUpload');
+      }}
+    />
+    </>
   );
 };
 
@@ -1531,6 +2581,10 @@ const styles = StyleSheet.create({
     position: 'relative',
     height: 500,
   },
+  mediaSlide: {
+    width,
+    height: '100%',
+  },
   productImage: {
     width: '100%',
     height: '100%',
@@ -1546,7 +2600,8 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 2,
+    gap: 4,
+    alignSelf: 'flex-start',
     shadowColor: '#000',
     shadowOpacity: 0.1,
     shadowRadius: 2,
@@ -1586,6 +2641,21 @@ const styles = StyleSheet.create({
   wishlistButton: {
     position: 'absolute',
     top: 16,
+    right: 16,
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    borderRadius: 25,
+    padding: 8,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 2,
+  },
+  fullViewButton: {
+    position: 'absolute',
+    top: 72,
     right: 16,
     backgroundColor: 'rgba(255,255,255,0.9)',
     borderRadius: 25,
@@ -1854,31 +2924,71 @@ const styles = StyleSheet.create({
   tryOnButton: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: '#fff',
     borderRadius: 8,
     borderWidth: 2,
     borderColor: '#F53F7A',
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     paddingVertical: 14,
+    minHeight: 52,
+    flex: 1,
     marginRight: 12,
   },
   tryOnButtonText: {
     color: '#F53F7A',
     fontSize: 16,
     fontWeight: 'bold',
-    marginLeft: 8,
+  },
+  bottomTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
   },
   addToCartButton: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#F53F7A',
     borderRadius: 8,
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     paddingVertical: 14,
     flex: 1,
     justifyContent: 'center',
+    minHeight: 52,
   },
   addToCartButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  resellButtonFull: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#22C55E',
+    borderRadius: 10,
+    paddingVertical: 14,
+    minHeight: 52,
+    marginTop: 8,
+    width: '100%',
+  },
+  resellButtonFullText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  resellButtonFull: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#22C55E',
+    borderRadius: 10,
+    paddingVertical: 14,
+    minHeight: 52,
+    marginTop: 4,
+  },
+  resellButtonFullText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
@@ -1918,13 +3028,10 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   bottomBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 16,
     backgroundColor: '#fff',
     borderTopWidth: 1,
     borderTopColor: '#eee',
+    padding: 16,
     marginBottom: 20,
   },
   shareModalContent: {
@@ -1944,6 +3051,161 @@ const styles = StyleSheet.create({
   shareModalText: {
     fontSize: 16,
     color: '#222',
+  },
+  marginModalOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    zIndex: 10000,
+    padding: 16,
+  },
+  marginModal: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 24,
+    width: '100%',
+    maxWidth: 420,
+    maxHeight: '85%',
+  },
+  marginScroll: {
+    maxHeight: '100%',
+  },
+  marginModalTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#111',
+    marginBottom: 4,
+  },
+  marginModalSubtitle: {
+    fontSize: 16,
+    color: '#555',
+    marginBottom: 20,
+  },
+  marginOptions: {
+    marginBottom: 16,
+  },
+  marginOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#f0f0f0',
+    borderRadius: 12,
+    marginBottom: 12,
+  },
+  marginOptionSelected: {
+    borderColor: '#F53F7A',
+    backgroundColor: '#FFF5F8',
+  },
+  radioCircle: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: '#F53F7A',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  radioDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#F53F7A',
+  },
+  marginOptionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#111',
+  },
+  marginOptionDesc: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 2,
+  },
+  customPriceContainer: {
+    marginTop: 8,
+    marginBottom: 20,
+  },
+  customPriceLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#111',
+    marginBottom: 8,
+  },
+  customPriceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  customCurrency: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#111',
+    marginRight: 4,
+  },
+  customPriceInput: {
+    flex: 1,
+    fontSize: 18,
+    color: '#111',
+  },
+  customPriceError: {
+    color: '#D93025',
+    marginTop: 6,
+  },
+  customPriceHelp: {
+    color: '#6B7280',
+    marginTop: 4,
+  },
+  marginSummary: {
+    marginTop: 4,
+    marginBottom: 16,
+    padding: 16,
+    backgroundColor: '#F9FAFB',
+    borderRadius: 16,
+  },
+  marginSummaryTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#111',
+    marginBottom: 12,
+  },
+  marginSummaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  marginSummaryLabel: {
+    fontSize: 14,
+    color: '#6B7280',
+  },
+  marginSummaryValue: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#111',
+  },
+  marginSummaryHighlight: {
+    color: '#10B981',
+  },
+  marginSummaryProfit: {
+    color: '#F53F7A',
+  },
+  marginContinueBtn: {
+    backgroundColor: '#F53F7A',
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  marginContinueText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
   },
 
   modalCloseButton: {
@@ -2086,53 +3348,40 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 18,
   },
-  akoolOptions: {
-    marginBottom: 10,
+  tryOnInfoCard: {
+    width: '100%',
+    borderWidth: 1,
+    borderColor: '#FEE2E8',
+    borderRadius: 16,
+    padding: 16,
+    backgroundColor: '#FFF6FA',
+    marginBottom: 16,
   },
-  akoolOption: {
+  tryOnInfoHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#eee',
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 12,
-    backgroundColor: '#fafbfc',
+    gap: 8,
+    marginBottom: 8,
   },
-  akoolOptionSelected: {
-    borderColor: '#F53F7A',
-    backgroundColor: '#fff0f6',
-  },
-  radioCircle: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 2,
-    borderColor: '#F53F7A',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 14,
-  },
-  radioDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#F53F7A',
-  },
-  akoolOptionTitle: {
+  tryOnInfoTitle: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#222',
+    fontWeight: '700',
+    color: '#F53F7A',
   },
-  akoolCoin: {
+  tryOnInfoDesc: {
+    fontSize: 14,
+    color: '#444',
+    lineHeight: 20,
+    marginBottom: 8,
+  },
+  tryOnInfoCost: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  tryOnInfoCostText: {
     color: '#F53F7A',
     fontWeight: '700',
-    fontSize: 15,
-  },
-  akoolOptionDesc: {
-    fontSize: 13,
-    color: '#888',
-    marginTop: 2,
   },
   akoolBalance: {
     fontSize: 15,
@@ -2150,6 +3399,349 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 17,
     fontWeight: '700',
+  },
+  consentOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  consentModal: {
+    width: '100%',
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 24,
+  },
+  consentIconCircle: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#FFF0F5',
+    justifyContent: 'center',
+    alignItems: 'center',
+    alignSelf: 'center',
+    marginBottom: 16,
+  },
+  consentTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    textAlign: 'center',
+    color: '#111827',
+    marginBottom: 16,
+  },
+  consentContent: {
+    gap: 12,
+    marginBottom: 20,
+  },
+  consentPoint: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  consentBullet: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#ECFDF5',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  consentPointText: {
+    flex: 1,
+    fontSize: 15,
+    color: '#1F2933',
+    lineHeight: 20,
+  },
+  consentButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  consentCancelButton: {
+    flex: 1,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  consentCancelText: {
+    color: '#1F2933',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  consentAgreeButton: {
+    flex: 1,
+    borderRadius: 12,
+    backgroundColor: '#F53F7A',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+  },
+  consentAgreeText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  sizeModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  sizeModalContainer: {
+    width: '100%',
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 20,
+  },
+  sizeModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  sizeModalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#111',
+  },
+  sizeModalSubtitle: {
+    fontSize: 14,
+    color: '#4B5563',
+    marginBottom: 16,
+  },
+  sizeModalCloseButton: {
+    padding: 4,
+  },
+  sizeOptionsWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    marginBottom: 12,
+  },
+  sizeOptionChip: {
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    backgroundColor: '#fff',
+  },
+  sizeOptionChipSelected: {
+    borderColor: '#F53F7A',
+    backgroundColor: '#FFF0F5',
+  },
+  sizeOptionChipText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#1F2933',
+  },
+  sizeOptionChipTextSelected: {
+    color: '#F53F7A',
+  },
+  sizeSelectionError: {
+    color: '#DC2626',
+    fontSize: 13,
+    marginBottom: 12,
+  },
+  sizeModalConfirmButton: {
+    backgroundColor: '#F53F7A',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  sizeModalConfirmText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+
+  // More Like This Styles (Horizontal Scroll)
+  moreLikeThisContainer: {
+    marginTop: 20,
+    marginBottom: 20,
+  },
+  moreLikeThisHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    marginBottom: 16,
+  },
+  moreLikeThisTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  seeMoreText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#F53F7A',
+  },
+  suggestionsListContent: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  suggestionsScrollView: {
+    paddingLeft: 0,
+    paddingHorizontal: 0,
+  },
+  suggestionsWrapper: {
+    width: '100%',
+  },
+  suggestionCard: {
+    width: 160,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#F3F4F6',
+    position: 'relative',
+    marginRight: 12,
+  },
+  suggestionImage: {
+    width: 160,
+    height: 180,
+    backgroundColor: '#F9FAFB',
+    resizeMode: 'cover',
+  },
+  suggestionInfo: {
+    padding: 10,
+  },
+  suggestionAddButton: {
+    position: 'absolute',
+    bottom: 10,
+    right: 10,
+    backgroundColor: '#F53F7A',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
+  },
+  suggestionVendorName: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#282c3f',
+    marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  suggestionProductName: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#111827',
+    lineHeight: 18,
+    marginBottom: 6,
+  },
+  suggestionPriceContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  suggestionPrice: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#F53F7A',
+  },
+  suggestionOriginalPrice: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#9CA3AF',
+    textDecorationLine: 'line-through',
+  },
+  suggestionDiscountBadge: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#F53F7A',
+    backgroundColor: '#FFF0F5',
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  fullscreenContainer: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  fullscreenSafeArea: {
+    flex: 1,
+    paddingTop: 24,
+  },
+  fullscreenHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  fullscreenCloseButton: {
+    padding: 8,
+    width: 44,
+  },
+  fullscreenTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  fullscreenHeaderAction: {
+    width: 44,
+    alignItems: 'flex-end',
+  },
+  fullscreenControlButton: {
+    padding: 8,
+  },
+  fullscreenContent: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  fullscreenMedia: {
+    width: '100%',
+    height: '100%',
+  },
+  fullscreenHint: {
+    position: 'absolute',
+    bottom: 16,
+    left: 16,
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    borderRadius: 16,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  fullscreenHintText: {
+    marginLeft: 6,
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: 0.3,
+  },
+  zoomIndicator: {
+    position: 'absolute',
+    bottom: 16,
+    right: 16,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    borderRadius: 16,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  zoomIndicatorText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
   },
 });
 

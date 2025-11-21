@@ -434,25 +434,34 @@ CREATE TRIGGER update_product_like_count_trigger
   FOR EACH ROW
   EXECUTE FUNCTION update_product_like_count();
 
+-- Create sequence for incremental order numbers
+DROP SEQUENCE IF EXISTS order_number_seq;
+CREATE SEQUENCE order_number_seq START 1;
+
 -- Function to generate order numbers
 CREATE OR REPLACE FUNCTION generate_order_number()
 RETURNS TRIGGER AS $$
+DECLARE
+  new_order_num TEXT;
 BEGIN
-  NEW.order_number := 'ORD-' || EXTRACT(YEAR FROM NOW()) || '-' || 
-                     LPAD(EXTRACT(MONTH FROM NOW())::text, 2, '0') || '-' ||
-                     LPAD(nextval('order_number_seq')::text, 6, '0');
+  -- Only generate if order_number is NULL or empty
+  IF NEW.order_number IS NULL OR NEW.order_number = '' THEN
+    -- Generate order number: ORD-YYYYMMDD-001, ORD-YYYYMMDD-002, etc.
+    new_order_num := 'ORD-' || TO_CHAR(NOW(), 'YYYYMMDD') || '-' || 
+                     LPAD(nextval('order_number_seq')::text, 3, '0');
+    
+    NEW.order_number := new_order_num;
+  END IF;
+  
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
--- Create sequence for order numbers
-CREATE SEQUENCE IF NOT EXISTS order_number_seq START 1;
-
 -- Trigger for order number generation
+DROP TRIGGER IF EXISTS generate_order_number_trigger ON orders;
 CREATE TRIGGER generate_order_number_trigger
   BEFORE INSERT ON orders
   FOR EACH ROW
-  WHEN (NEW.order_number IS NULL)
   EXECUTE FUNCTION generate_order_number();
 
 -- Function to update timestamps

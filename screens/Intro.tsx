@@ -26,7 +26,7 @@ const slides = [
     subtitle:
       'Preview outfits on your own photo with our instant face swap technology. See yourself in every style before you buy.',
     features: [
-      { icon: 'camera', text: 'Virtual Try-On' },
+      { icon: 'camera', text: 'Face Swap' },
       { icon: 'image', text: 'Realistic Previews' },
       { icon: 'flash', text: 'Instant Results' },
       { icon: 'checkmark-done', text: 'No Guesswork' },

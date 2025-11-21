@@ -76,10 +76,7 @@ export const getAllSettings = async (): Promise<Setting[]> => {
   }
 };
 
-export const updateRazorpayKey = async (keyId: string): Promise<boolean> => {
-  return await setSetting('razorpay_key_id', keyId, 'Razorpay Key ID for payment processing');
-};
-
-export const getRazorpayKey = async (): Promise<string | null> => {
-  return await getSetting('razorpay_key_id');
+// Google Places API Key (stored in Supabase settings table)
+export const getGooglePlacesApiKey = async (): Promise<string | null> => {
+  return await getSetting('google_places_api_key');
 };

@@ -14,7 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useUser } from '~/contexts/UserContext';
-import { getAllSettings, setSetting, updateRazorpayKey } from '~/utils/settings';
+import { getAllSettings, setSetting } from '~/utils/settings';
 import { Setting } from '~/utils/settings';
 
 const SettingsManagement = () => {
@@ -79,22 +79,12 @@ const SettingsManagement = () => {
     try {
       setSaving(true);
       
-      if (editingKey === 'razorpay_key_id') {
-        const success = await updateRazorpayKey(editValue.trim());
-        if (success) {
-          Alert.alert('Success', 'Razorpay key updated successfully');
-        } else {
-          Alert.alert('Error', 'Failed to update Razorpay key');
-          return;
-        }
+      const success = await setSetting(editingKey, editValue.trim());
+      if (success) {
+        Alert.alert('Success', 'Setting updated successfully');
       } else {
-        const success = await setSetting(editingKey, editValue.trim());
-        if (success) {
-          Alert.alert('Success', 'Setting updated successfully');
-        } else {
-          Alert.alert('Error', 'Failed to update setting');
-          return;
-        }
+        Alert.alert('Error', 'Failed to update setting');
+        return;
       }
 
       setEditingKey(null);

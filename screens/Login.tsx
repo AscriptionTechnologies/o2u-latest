@@ -19,6 +19,7 @@ import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { supabase } from '~/utils/supabase';
 import { useAuth } from '~/contexts/useAuth';
+import { Only2ULogo } from '../components/common';
 
 const Login = () => {
   // Animation values
@@ -166,7 +167,7 @@ const Login = () => {
                 <View style={styles.logoContainer}>
                   <View style={styles.logoCircle}>
                     <Text style={styles.logoText}>
-                      Only<Text style={{ color: '#F53F7A' }}>2</Text>U
+                      <Only2ULogo size="large" />
                     </Text>
                   </View>
                 </View>

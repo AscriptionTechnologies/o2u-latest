@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -23,6 +23,11 @@ import { useAuth } from '~/contexts/useAuth';
 import { piAPIVirtualTryOnService } from '~/services/piapiVirtualTryOn';
 import { supabase } from '~/utils/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Toast from 'react-native-toast-message';
+import { useLoginSheet } from '~/contexts/LoginSheetContext';
+import { useUser } from '~/contexts/UserContext';
+import BottomSheet from '@gorhom/bottom-sheet';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { width } = Dimensions.get('window');
 const POST_SIZE = (width - 6) / 3;
@@ -511,6 +516,9 @@ const VendorProfile: React.FC = () => {
   const route = useRoute<VendorProfileRouteProp>();
   const navigation = useNavigation();
   const { user } = useAuth();
+  const { userData } = useUser();
+  const { showLoginSheet } = useLoginSheet();
+  const insets = useSafeAreaInsets();
   const {
     fetchVendorById,
     fetchVendorPosts,
@@ -530,11 +538,18 @@ const VendorProfile: React.FC = () => {
   const [vendor, setVendor] = useState<Vendor | null>(initialVendor || null);
   const [vendorPosts, setVendorPosts] = useState<VendorPost[]>([]);
   const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'posts' | 'tagged'>('posts');
+  const [activeTab, setActiveTab] = useState<'posts' | 'products' | 'tagged' | 'collaborations'>('products');
   const [vendorProducts, setVendorProducts] = useState<any[]>([]);
+  const [collaborations, setCollaborations] = useState<any[]>([]);
   const scrollRef = useRef<ScrollView | null>(null);
   const [productsY, setProductsY] = useState(0);
   const [productRatings, setProductRatings] = useState<{ [productId: string]: { rating: number; reviews: number } }>({});
+  
+  // UGC Actions Sheet
+  const ugcActionsSheetRef = useRef<BottomSheet>(null);
+  const [blockedUserIds, setBlockedUserIds] = useState<string[]>([]);
+  const [blockedVendorNames, setBlockedVendorNames] = useState<string[]>([]);
+  const [supportsVendorNameBlocking, setSupportsVendorNameBlocking] = useState(true);
 
   useEffect(() => {
     if (vendorId) {
@@ -545,11 +560,68 @@ const VendorProfile: React.FC = () => {
     }
   }, [vendorId]);
 
+  // Load blocked users and vendor names for current user
+  useEffect(() => {
+    const fetchBlocked = async () => {
+      if (!userData?.id) return;
+      try {
+        const columns = supportsVendorNameBlocking ? 'blocked_user_id, blocked_vendor_name' : 'blocked_user_id';
+        const { data, error } = await supabase
+          .from('blocked_users')
+          .select(columns)
+          .eq('user_id', userData.id);
+        
+        if (error) {
+          if (error.code === 'PGRST204' && supportsVendorNameBlocking) {
+            setSupportsVendorNameBlocking(false);
+            setBlockedVendorNames([]);
+            return fetchBlocked();
+          }
+          console.error('Error loading blocked users:', error);
+          return;
+        }
+
+        if (data) {
+          setBlockedUserIds(data.map((r: any) => r.blocked_user_id).filter(Boolean));
+          if (supportsVendorNameBlocking) {
+            setBlockedVendorNames(data.map((r: any) => r.blocked_vendor_name).filter(Boolean));
+          } else {
+            setBlockedVendorNames([]);
+          }
+        }
+      } catch (err) {
+        console.error('Error loading blocked users:', err);
+      }
+    };
+    fetchBlocked();
+  }, [userData?.id, supportsVendorNameBlocking]);
+
   const loadVendorData = async () => {
     if (!vendorId) return;
     
     setLoading(true);
     try {
+      // If it's a mock vendor (from trending screen), use the initial vendor data
+      if (vendorId.startsWith('mock_') && initialVendor) {
+        // Ensure vendor has all required fields with defaults
+        const completeVendor = {
+          follower_count: 0,
+          following_count: 0,
+          is_verified: false,
+          description: '',
+          location: '',
+          website_url: '',
+          instagram_handle: '',
+          tiktok_handle: '',
+          ...initialVendor,
+        };
+        setVendor(completeVendor as any);
+        setVendorPosts([]);
+        setVendorProducts([]);
+        setLoading(false);
+        return;
+      }
+
       const vendorData = await fetchVendorById(vendorId);
       if (vendorData) {
         setVendor(vendorData);
@@ -567,9 +639,14 @@ const VendorProfile: React.FC = () => {
           name,
           description,
           category_id,
+          category:categories(name),
+          image_urls,
+          video_urls,
           is_active,
           updated_at,
           like_count,
+          return_policy,
+          featured_type,
           vendor_id,
           vendor_name,
           alias_vendor,
@@ -580,17 +657,20 @@ const VendorProfile: React.FC = () => {
             quantity,
             price,
             discount_percentage,
+            sku,
             image_urls,
             video_urls,
             size:sizes(name)
           )
         `)
+        .eq('vendor_id', vendorId)
         .eq('is_active', true)
         .order('created_at', { ascending: false });
 
       if (!prodErr) {
         const normalized = (prodData || []).map((p: any) => ({
           ...p,
+          category: Array.isArray(p.category) ? p.category[0] : p.category,
           variants: p.product_variants || [],
         }));
         setVendorProducts(normalized);
@@ -652,31 +732,58 @@ const VendorProfile: React.FC = () => {
 
   const handleTryOn = async (productId: string) => {
     if (!user) {
-      Alert.alert('Login Required', 'Please login to try on products');
+      Toast.show({
+        type: 'info',
+        text1: 'Login Required',
+      text2: 'Please login to use Face Swap.',
+      });
+      showLoginSheet();
+      return;
+    }
+
+    // Find the product in vendorProducts
+    const product = vendorProducts.find(p => p.id === productId);
+    if (!product) {
+      Alert.alert('Error', 'Product not found');
+      return;
+    }
+
+    const productImageUrl = getFirstImage(product);
+    const userImageUrl = user.user_metadata?.avatar_url || user.user_metadata?.profilePhoto || '';
+
+    if (!userImageUrl) {
+      Alert.alert('Profile Photo Required', 'Please upload a profile photo to use face swap');
       return;
     }
 
     try {
+      Alert.alert('Face Swap', 'Starting face swap process...');
+      
       const result = await piAPIVirtualTryOnService.initiateVirtualTryOn({
-        userImageUrl: user.user_metadata?.avatar_url || '',
-        productImageUrl: '', // Will be fetched from product
+        userImageUrl,
+        productImageUrl,
         productId,
         batchSize: 1
       });
 
       if (result.success) {
-        Alert.alert('Success', 'Virtual try-on started! You will be notified when ready.');
+        Alert.alert('Success', 'Face swap started! You will be notified when ready.');
       } else {
-        Alert.alert('Error', result.error || 'Failed to start virtual try-on');
+        Alert.alert('Error', result.error || 'Failed to start face swap');
       }
     } catch (error) {
-      console.error('Error starting virtual try-on:', error);
-      Alert.alert('Error', 'Failed to start virtual try-on');
+      console.error('Error starting face swap:', error);
+      Alert.alert('Error', 'Failed to start face swap');
     }
   };
 
   const handleShopNow = (productId: string) => {
-    navigation.navigate('ProductDetails' as never, { productId } as never);
+    const product = vendorProducts.find((p) => p.id === productId);
+    if (!product) {
+      Alert.alert('Product unavailable', 'We could not load this product right now.');
+      return;
+    }
+    openProductDetails(product);
   };
 
   const handleLikePost = async (postId: string, isLiked: boolean) => {
@@ -704,12 +811,34 @@ const VendorProfile: React.FC = () => {
     }
   };
 
+  const shareToWhatsApp = async (message: string) => {
+    try {
+      const whatsappUrl = `whatsapp://send?text=${encodeURIComponent(message)}`;
+      const canOpen = await Linking.canOpenURL(whatsappUrl);
+      if (canOpen) {
+        await Linking.openURL(whatsappUrl);
+      } else {
+        Alert.alert('WhatsApp not installed', 'Please install WhatsApp to share.');
+      }
+    } catch (error) {
+      console.error('Error opening WhatsApp:', error);
+      Alert.alert('Error', 'Unable to open WhatsApp for sharing.');
+    }
+  };
+
   const handleSharePost = async (postId: string) => {
     try {
-      const success = await sharePost(postId);
-      if (success) {
-        Alert.alert('Success', 'Post shared successfully!');
-      }
+      // Build a simple share message for WhatsApp
+      const post = vendorPosts.find(p => p.id === postId);
+      const media = post?.media_urls?.[0] || '';
+      const vendorName = vendor?.business_name || 'this vendor';
+      const vendorUrl = vendor?.id ? `https://only2u.app/vendor/${vendor.id}` : 'https://only2u.app';
+      const message = `Check out this post by ${vendorName} on Only2U 👇\n${media}\n${vendorUrl}`;
+
+      await shareToWhatsApp(message);
+
+      // Optionally notify backend about share
+      try { await sharePost(postId); } catch {}
     } catch (error) {
       console.error('Error sharing post:', error);
       Alert.alert('Error', 'Failed to share post');
@@ -745,46 +874,167 @@ const VendorProfile: React.FC = () => {
   };
 
   const getFirstImage = (product: any) => {
-    const fromVariant = product?.variants?.find((v: any) => v.image_urls && v.image_urls.length > 0);
-    return fromVariant?.image_urls?.[0] || 'https://via.placeholder.com/300x400/eeeeee/999999?text=Product';
+    const fromProduct = Array.isArray(product?.image_urls) && product.image_urls.length > 0
+      ? product.image_urls[0]
+      : null;
+    if (fromProduct) return fromProduct;
+
+    const fromVariant = product?.variants?.find(
+      (v: any) => Array.isArray(v.image_urls) && v.image_urls.length > 0
+    );
+    return (
+      fromVariant?.image_urls?.[0] ||
+      'https://via.placeholder.com/300x400/eeeeee/999999?text=Product'
+    );
   };
 
-  const renderProductCard = (p: any) => {
-    const price = getSmallestPrice(p);
-    const discountPct = Math.max(...(p?.variants?.map((v: any) => v.discount_percentage || 0) || [0]));
+  const buildProductDetailsPayload = useCallback(
+    (product: any) => {
+      if (!product) return null;
+
+      const variantImages =
+        product?.variants?.flatMap((variant: any) =>
+          Array.isArray(variant.image_urls) ? variant.image_urls : []
+        ) || [];
+      const productImages =
+        Array.isArray(product?.image_urls) ? product.image_urls : [];
+      const allImages = [...productImages, ...variantImages].filter(
+        (url: string) => !!url
+      );
+      const uniqueImages = Array.from(new Set(allImages));
+
+      const variantVideos =
+        product?.variants?.flatMap((variant: any) =>
+          Array.isArray(variant.video_urls) ? variant.video_urls : []
+        ) || [];
+      const productVideos =
+        Array.isArray(product?.video_urls) ? product.video_urls : [];
+      const allVideos = [...productVideos, ...variantVideos].filter(
+        (url: string) => !!url
+      );
+
+      const variantPrices =
+        product?.variants
+          ?.map((variant: any) => Number(variant.price) || 0)
+          .filter((price: number) => price > 0) || [];
+      const price =
+        variantPrices.length > 0
+          ? Math.min(...variantPrices)
+          : Number(product?.price) || 0;
+
+      const variantDiscounts =
+        product?.variants?.map(
+          (variant: any) => Number(variant.discount_percentage) || 0
+        ) || [];
+      const discount =
+        variantDiscounts.length > 0 ? Math.max(...variantDiscounts) : 0;
+
+      const originalPrice =
+        discount > 0 && price > 0
+          ? Math.round(price / (1 - discount / 100))
+          : undefined;
+
+      const ratingData =
+        productRatings[product.id] ?? { rating: 0, reviews: 0 };
+
+      const totalStock =
+        product?.variants?.reduce(
+          (sum: number, variant: any) => sum + (variant.quantity || 0),
+          0
+        ) || 0;
+
+      const fallbackImage = getFirstImage(product);
+      const finalImages =
+        uniqueImages.length > 0 ? uniqueImages : [fallbackImage];
+
+      return {
+        id: product.id,
+        name: product.name,
+        price,
+        originalPrice,
+        discount,
+        rating: ratingData.rating,
+        reviews: ratingData.reviews,
+        image: finalImages[0],
+        image_urls: finalImages,
+        video_urls: allVideos,
+        description: product.description,
+        stock: totalStock.toString(),
+        featured: !!product.featured_type,
+        images: finalImages.length || 1,
+        sku: product?.variants?.[0]?.sku || '',
+        category: product.category?.name || '',
+        vendor_name: product.vendor_name || vendor?.business_name || '',
+        alias_vendor: product.alias_vendor || '',
+        return_policy: product.return_policy || '',
+      };
+    },
+    [getFirstImage, productRatings, vendor?.business_name]
+  );
+
+  const openProductDetails = useCallback(
+    (product: any) => {
+      const transformed = buildProductDetailsPayload(product);
+
+      if (!transformed) {
+        Alert.alert(
+          'Product unavailable',
+          'We could not load this product. Please try again later.'
+        );
+        return;
+      }
+
+      navigation.navigate(
+        'ProductDetails' as never,
+        { product: transformed } as never
+      );
+    },
+    [buildProductDetailsPayload, navigation]
+  );
+
+  const renderProductCard = (product: any) => {
+    const price = getSmallestPrice(product);
+    const discountPct = Math.max(...(product?.variants?.map((v: any) => v.discount_percentage || 0) || [0]));
     const hasDiscount = discountPct > 0;
     const originalPrice = hasDiscount ? price / (1 - discountPct / 100) : undefined;
-    const rating = productRatings[p.id]?.rating || 0;
-    const reviews = productRatings[p.id]?.reviews || 0;
+    const rating = productRatings[product.id]?.rating || 0;
+    const reviews = productRatings[product.id]?.reviews || 0;
+    const firstImage = getFirstImage(product);
+    const brandLabel = product.vendor_name || vendor?.business_name || 'Only2U';
+
     return (
-      <View key={p.id} style={styles.productCardWrap}>
-        <Image source={{ uri: getFirstImage(p) }} style={styles.productCardImage} />
-        <View style={styles.productCardInfo}>
-          <Text style={styles.productCardName} numberOfLines={1}>{p.name}</Text>
-          <View style={styles.priceRow}>
-            <Text style={styles.productCardPrice}>₹{price?.toFixed(2)}</Text>
+      <TouchableOpacity
+        key={product.id}
+        style={styles.productCard}
+        activeOpacity={0.85}
+        onPress={() => openProductDetails(product)}
+      >
+        {hasDiscount && (
+          <View style={styles.discountBadge}>
+            <Text style={styles.discountBadgeText}>{Math.round(discountPct)}% OFF</Text>
+          </View>
+        )}
+        <Image source={{ uri: firstImage }} style={styles.productImage} />
+        <Text style={styles.brandName} numberOfLines={1}>{brandLabel}</Text>
+        <Text style={styles.productName} numberOfLines={2}>{product.name}</Text>
+        <View style={styles.priceContainer}>
+          <View style={styles.priceInfo}>
             {hasDiscount && (
-              <>
-                <Text style={styles.originalPriceSmall}>₹{(originalPrice || 0).toFixed(2)}</Text>
-                <Text style={styles.discountChip}>{Math.round(discountPct)}% OFF</Text>
-              </>
+              <Text style={styles.originalPrice}>₹{(originalPrice || 0).toFixed(0)}</Text>
             )}
+            <Text style={styles.price}>₹{price?.toFixed(0)}</Text>
           </View>
-          <View style={styles.ratingRow}>
-            <Ionicons name="star" size={14} color="#FFD700" />
-            <Text style={styles.ratingText}>{rating.toFixed(1)}</Text>
-            <Text style={styles.reviewsText}>({reviews})</Text>
-          </View>
-          <View style={styles.productCardActions}>
-            <TouchableOpacity style={styles.productTryOnBtn} onPress={() => handleTryOn(p.id)}>
-              <Text style={styles.productTryOnText}>Try On</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.productShopBtn} onPress={() => handleShopNow(p.id)}>
-              <Text style={styles.productShopText}>Shop Now</Text>
-            </TouchableOpacity>
+          <View style={styles.discountAndRatingRow}>
+            {hasDiscount && (
+              <Text style={styles.discountPercentage}>{Math.round(discountPct)}% OFF</Text>
+            )}
+            <View style={styles.reviewsContainer}>
+              <Ionicons name="star" size={12} color="#FFD600" style={{ marginRight: 2 }} />
+              <Text style={styles.reviews}>{rating.toFixed(1)}</Text>
+            </View>
           </View>
         </View>
-      </View>
+      </TouchableOpacity>
     );
   };
 
@@ -811,30 +1061,22 @@ const VendorProfile: React.FC = () => {
       )}
 
       {post.product_id && (
-        <View style={styles.productCard}>
+        <TouchableOpacity
+          style={styles.postProductCard}
+          activeOpacity={0.85}
+          onPress={() => handleShopNow(post.product_id!)}
+        >
           <Image 
-            source={{ uri: post.product_images?.[0] || 'https://via.placeholder.com/80' }} 
-            style={styles.productImage} 
+            source={{ uri: post.product_images?.[0] || 'https://via.placeholder.com/120' }} 
+            style={styles.postProductImage} 
           />
-          <View style={styles.productInfo}>
-            <Text style={styles.productName}>{post.product_name}</Text>
-            <Text style={styles.productPrice}>${post.price}</Text>
-            <View style={styles.productActions}>
-              <TouchableOpacity 
-                style={styles.tryOnButton}
-                onPress={() => handleTryOn(post.product_id!)}
-              >
-                <Text style={styles.tryOnButtonText}>Try On</Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={styles.shopNowButton}
-                onPress={() => handleShopNow(post.product_id!)}
-              >
-                <Text style={styles.shopNowButtonText}>Shop Now</Text>
-              </TouchableOpacity>
-            </View>
+          <View style={styles.postProductInfo}>
+            <Text style={styles.postProductName} numberOfLines={1}>{post.product_name}</Text>
+            <Text style={styles.postProductPrice}>
+              ₹{Number(post.price || 0).toFixed(0)}
+            </Text>
           </View>
-        </View>
+        </TouchableOpacity>
       )}
 
       <View style={styles.postActions}>
@@ -905,166 +1147,507 @@ const VendorProfile: React.FC = () => {
           <Ionicons name="arrow-back" size={24} color="#000" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{vendor.business_name}</Text>
-        <TouchableOpacity>
+        <TouchableOpacity onPress={() => ugcActionsSheetRef.current?.expand()}>
           <Ionicons name="ellipsis-horizontal" size={24} color="#000" />
         </TouchableOpacity>
       </View>
 
       <ScrollView style={styles.content} ref={ref => (scrollRef.current = ref)}>
-        {/* Profile Header */}
+        {/* Instagram-Style Profile Header */}
         <View style={styles.profileHeader}>
-          <View style={styles.profileInfo}>
+          {/* Profile Info Row */}
+          <View style={styles.profileInfoRow}>
+            {/* Profile Picture */}
             <Image 
               source={{ uri: vendor.profile_image_url || 'https://via.placeholder.com/100' }} 
               style={styles.profileImage} 
             />
-            <View style={styles.statsContainer}>
-              <View style={styles.statItem}>
+            
+            {/* Stats */}
+            <View style={styles.statsRow}>
+              <TouchableOpacity style={styles.statItem}>
                 <Text style={styles.statNumber}>{vendorPosts.length}</Text>
-                <Text style={styles.statLabel}>Posts</Text>
-              </View>
-              <View style={styles.statItem}>
-                <Text style={styles.statNumber}>{vendor.follower_count}</Text>
-                <Text style={styles.statLabel}>Followers</Text>
-              </View>
-              <View style={styles.statItem}>
-                <Text style={styles.statNumber}>{vendor.following_count}</Text>
-                <Text style={styles.statLabel}>Following</Text>
-              </View>
+                <Text style={styles.statLabel}>posts</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.statItem}>
+                <Text style={styles.statNumber}>{vendor.follower_count || 0}</Text>
+                <Text style={styles.statLabel}>followers</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.statItem}>
+                <Text style={styles.statNumber}>{vendor.following_count || 0}</Text>
+                <Text style={styles.statLabel}>following</Text>
+              </TouchableOpacity>
             </View>
           </View>
 
-          <View style={styles.profileDetails}>
+          {/* Business Name & Verification */}
+          <View style={styles.nameRow}>
             <Text style={styles.businessName}>{vendor.business_name}</Text>
             {vendor.is_verified && (
-              <View style={styles.verifiedBadge}>
-                <Ionicons name="checkmark-circle" size={16} color="#1DA1F2" />
-                <Text style={styles.verifiedText}>Verified</Text>
-              </View>
-            )}
-            {vendor.description && (
-              <Text style={styles.description}>{vendor.description}</Text>
-            )}
-            {vendor.location && (
-              <Text style={styles.location}>
-                <Ionicons name="location-outline" size={14} color="#666" />
-                {' '}{vendor.location}
-              </Text>
+              <Ionicons name="checkmark-circle" size={16} color="#1DA1F2" style={{ marginLeft: 4 }} />
             )}
           </View>
 
-          <View style={styles.actionButtons}>
+          {/* Bio/Description */}
+          {vendor.description && (
+            <Text style={styles.bio}>{vendor.description}</Text>
+          )}
+
+          {/* Location */}
+          {vendor.location && (
+            <View style={styles.locationRow}>
+              <Ionicons name="location-sharp" size={12} color="#666" />
+              <Text style={styles.locationText}>{vendor.location}</Text>
+            </View>
+          )}
+
+          {/* Social Links */}
+          {(vendor.website_url || vendor.instagram_handle || vendor.tiktok_handle) && (
+            <View style={styles.socialLinksRow}>
+              {vendor.website_url && (
+                <TouchableOpacity 
+                  style={styles.socialLinkChip}
+                  onPress={() => handleOpenWebsite(vendor.website_url!)}
+                >
+                  <Ionicons name="globe-outline" size={14} color="#0095f6" />
+                  <Text style={styles.socialLinkText}>Website</Text>
+                </TouchableOpacity>
+              )}
+              {vendor.instagram_handle && (
+                <TouchableOpacity 
+                  style={styles.socialLinkChip}
+                  onPress={() => handleOpenSocial(vendor.instagram_handle!, 'instagram')}
+                >
+                  <Ionicons name="logo-instagram" size={14} color="#E4405F" />
+                  <Text style={styles.socialLinkText}>@{vendor.instagram_handle}</Text>
+                </TouchableOpacity>
+              )}
+              {vendor.tiktok_handle && (
+                <TouchableOpacity 
+                  style={styles.socialLinkChip}
+                  onPress={() => handleOpenSocial(vendor.tiktok_handle!, 'tiktok')}
+                >
+                  <Ionicons name="logo-tiktok" size={14} color="#000" />
+                  <Text style={styles.socialLinkText}>@{vendor.tiktok_handle}</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+
+          {/* Action Buttons */}
+          <View style={styles.actionButtonsRow}>
             <TouchableOpacity 
               style={[
-                styles.followButton,
+                styles.primaryActionButton,
                 isFollowingVendor(vendor.id) && styles.followingButton
               ]}
               onPress={handleFollow}
             >
               <Text style={[
-                styles.followButtonText,
+                styles.primaryActionButtonText,
                 isFollowingVendor(vendor.id) && styles.followingButtonText
               ]}>
                 {isFollowingVendor(vendor.id) ? 'Following' : 'Follow'}
               </Text>
             </TouchableOpacity>
-            
+
             <TouchableOpacity
-              style={styles.shopHeaderButton}
-              onPress={() => {
-                if (scrollRef.current) {
-                  scrollRef.current.scrollTo({ y: productsY, animated: true });
-                }
+              style={styles.iconActionButton}
+              onPress={async () => {
+                const vendorName = vendor?.business_name || 'this vendor';
+                const vendorUrl = vendor?.id ? `https://only2u.app/vendor/${vendor.id}` : 'https://only2u.app';
+                const message = `Check out ${vendorName} on Only2U 👇\n${vendorUrl}`;
+                await shareToWhatsApp(message);
               }}
             >
-              <Text style={styles.shopHeaderButtonText}>Shop Now</Text>
+              <Ionicons name="share-social-outline" size={20} color="#000" />
             </TouchableOpacity>
-          </View>
-
-          {/* Social Links */}
-          <View style={styles.socialLinks}>
-            {vendor.website_url && (
-              <TouchableOpacity 
-                style={styles.socialButton}
-                onPress={() => handleOpenWebsite(vendor.website_url!)}
-              >
-                <Ionicons name="globe-outline" size={20} color="#000" />
-                <Text style={styles.socialButtonText}>Website</Text>
-              </TouchableOpacity>
-            )}
-            {vendor.instagram_handle && (
-              <TouchableOpacity 
-                style={styles.socialButton}
-                onPress={() => handleOpenSocial(vendor.instagram_handle!, 'instagram')}
-              >
-                <Ionicons name="logo-instagram" size={20} color="#E4405F" />
-                <Text style={styles.socialButtonText}>Instagram</Text>
-              </TouchableOpacity>
-            )}
-            {vendor.tiktok_handle && (
-              <TouchableOpacity 
-                style={styles.socialButton}
-                onPress={() => handleOpenSocial(vendor.tiktok_handle!, 'tiktok')}
-              >
-                <Ionicons name="logo-tiktok" size={20} color="#000" />
-                <Text style={styles.socialButtonText}>TikTok</Text>
-              </TouchableOpacity>
-            )}
           </View>
         </View>
 
-        {/* Posts Section */}
-        <View style={styles.postsSection}>
-          <View style={styles.tabBar}>
+        {/* Instagram-like Tab Bar */}
+        <View style={styles.tabBarContainer}>
+          <View style={styles.tabBarInner}>
             <TouchableOpacity 
-              style={[styles.tab, activeTab === 'posts' && styles.activeTab]}
+              style={[styles.tabItem, activeTab === 'posts' && styles.activeTabItem]}
               onPress={() => setActiveTab('posts')}
             >
-              <Ionicons name="grid-outline" size={24} color={activeTab === 'posts' ? '#000' : '#666'} />
+              <Ionicons 
+                name="grid" 
+                size={20} 
+                color={activeTab === 'posts' ? '#000' : '#999'} 
+              />
+              <Text style={[styles.tabText, activeTab === 'posts' && styles.activeTabText]}>
+                POSTS
+              </Text>
+              {activeTab === 'posts' && <View style={styles.tabIndicator} />}
             </TouchableOpacity>
+
             <TouchableOpacity 
-              style={[styles.tab, activeTab === 'tagged' && styles.activeTab]}
+              style={[styles.tabItem, activeTab === 'products' && styles.activeTabItem]}
+              onPress={() => setActiveTab('products')}
+            >
+              <Ionicons 
+                name="storefront" 
+                size={20} 
+                color={activeTab === 'products' ? '#000' : '#999'} 
+              />
+              <Text style={[styles.tabText, activeTab === 'products' && styles.activeTabText]}>
+                PRODUCTS
+              </Text>
+              {activeTab === 'products' && <View style={styles.tabIndicator} />}
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={[styles.tabItem, activeTab === 'tagged' && styles.activeTabItem]}
               onPress={() => setActiveTab('tagged')}
             >
-              <Ionicons name="person-outline" size={24} color={activeTab === 'tagged' ? '#000' : '#666'} />
+              <Ionicons 
+                name="pricetag" 
+                size={20} 
+                color={activeTab === 'tagged' ? '#000' : '#999'} 
+              />
+              <Text style={[styles.tabText, activeTab === 'tagged' && styles.activeTabText]}>
+                TAGGED
+              </Text>
+              {activeTab === 'tagged' && <View style={styles.tabIndicator} />}
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={[styles.tabItem, activeTab === 'collaborations' && styles.activeTabItem]}
+              onPress={() => setActiveTab('collaborations')}
+            >
+              <Ionicons 
+                name="people" 
+                size={20} 
+                color={activeTab === 'collaborations' ? '#000' : '#999'} 
+              />
+              <Text style={[styles.tabText, activeTab === 'collaborations' && styles.activeTabText]}>
+                COLLABS
+              </Text>
+              {activeTab === 'collaborations' && <View style={styles.tabIndicator} />}
             </TouchableOpacity>
           </View>
-
-          {activeTab === 'posts' ? (
-            <View>
-              {vendorPosts.map((post) => (
-                <View key={post.id} style={styles.postContainer}>
-                  {renderPostDetail(post)}
-                </View>
-              ))}
-            </View>
-          ) : (
-            <View style={styles.taggedContainer}>
-              <Text style={styles.taggedText}>No tagged posts yet</Text>
-            </View>
-          )}
         </View>
 
-        {/* Products Section */}
-        <View
-          style={styles.vendorProductsSection}
-          onLayout={(e) => setProductsY(e.nativeEvent.layout.y - 12)}
-        >
-          <View style={styles.vendorProductsHeader}>
-            <Ionicons name="storefront-outline" size={18} color="#F53F7A" />
-            <Text style={styles.vendorProductsTitle}>Products</Text>
-          </View>
-          {vendorProducts.length === 0 ? (
-            <View style={styles.noProductsContainer}>
-              <Text style={styles.noProductsText}>No products yet</Text>
+        {/* Tab Content */}
+        <View style={styles.tabContent}>
+          {/* Posts Tab - Show all product images in grid */}
+          {activeTab === 'posts' && (
+            <View style={styles.postsGrid}>
+              {vendorProducts.length === 0 ? (
+                <View style={styles.emptyTabState}>
+                  <Ionicons name="images-outline" size={64} color="#ddd" />
+                  <Text style={styles.emptyTabTitle}>No Products Yet</Text>
+                  <Text style={styles.emptyTabSubtitle}>Product images from {vendor.business_name} will appear here</Text>
+                </View>
+              ) : (
+                <View style={styles.gridContainer}>
+                  {vendorProducts.map((product) => {
+                    const firstImage = getFirstImage(product);
+                    return (
+                      <TouchableOpacity 
+                        key={product.id} 
+                        style={styles.gridItem}
+                        onPress={() => openProductDetails(product)}
+                      >
+                        <Image 
+                          source={{ uri: firstImage }} 
+                          style={styles.gridImage}
+                          resizeMode="cover"
+                        />
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              )}
             </View>
-          ) : (
-            <View style={styles.productsGrid}>
-              {vendorProducts.map(renderProductCard)}
+          )}
+
+          {/* Products Tab - Category-wise display */}
+          {activeTab === 'products' && (
+            <ScrollView style={styles.productsContainer} showsVerticalScrollIndicator={false}>
+              {vendorProducts.length === 0 ? (
+                <View style={styles.emptyTabState}>
+                  <Ionicons name="cube-outline" size={64} color="#ddd" />
+                  <Text style={styles.emptyTabTitle}>No Products Yet</Text>
+                  <Text style={styles.emptyTabSubtitle}>Products from {vendor.business_name} will appear here</Text>
+                </View>
+              ) : (
+                <>
+                  {/* Group products by category */}
+                  {Object.entries(
+                    vendorProducts.reduce((acc, product) => {
+                      const categoryName = product.category?.name || 'Other';
+                      if (!acc[categoryName]) {
+                        acc[categoryName] = [];
+                      }
+                      acc[categoryName].push(product);
+                      return acc;
+                    }, {} as { [key: string]: any[] })
+                  ).map(([categoryName, categoryProducts]) => {
+                    // Get category object from first product
+                    const category = categoryProducts[0]?.category || { 
+                      id: categoryProducts[0]?.category_id || '', 
+                      name: categoryName 
+                    };
+                    
+                    return (
+                    <View key={categoryName} style={styles.categorySection}>
+                      {/* Category Header */}
+                      <View style={styles.categoryHeader}>
+                        <Text style={styles.categoryTitle}>{categoryName}</Text>
+                        <TouchableOpacity
+                          style={styles.seeMoreButton}
+                          onPress={() => {
+                            navigation.navigate('Products' as never, { 
+                              category: {
+                                id: category.id || categoryProducts[0]?.category_id || '',
+                                name: categoryName,
+                                description: '',
+                                is_active: true,
+                                created_at: new Date().toISOString(),
+                                updated_at: new Date().toISOString()
+                              },
+                              vendorId: vendor.id
+                            } as never);
+                          }}
+                        >
+                          <Text style={styles.seeMoreText}>See More</Text>
+                          <Ionicons name="chevron-forward" size={16} color="#F53F7A" />
+                        </TouchableOpacity>
+                      </View>
+                      
+                      {/* Horizontal Product List */}
+                      <FlatList
+                        horizontal
+                        data={categoryProducts}
+                        renderItem={({ item }) => renderProductCard(item)}
+                        keyExtractor={(item) => item.id}
+                        showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={styles.productsHorizontalList}
+                        ItemSeparatorComponent={() => <View style={{ width: 8 }} />}
+                      />
+                    </View>
+                    );
+                  })}
+                </>
+              )}
+            </ScrollView>
+          )}
+
+          {/* Tagged Tab */}
+          {activeTab === 'tagged' && (
+            <View style={styles.taggedGrid}>
+              <View style={styles.emptyTabState}>
+                <Ionicons name="pricetag-outline" size={64} color="#ddd" />
+                <Text style={styles.emptyTabTitle}>No Tagged Posts</Text>
+                <Text style={styles.emptyTabSubtitle}>Photos and videos where {vendor.business_name} is tagged will appear here</Text>
+              </View>
+            </View>
+          )}
+
+          {/* Collaborations Tab */}
+          {activeTab === 'collaborations' && (
+            <View style={styles.collaborationsGrid}>
+              <View style={styles.emptyTabState}>
+                <Ionicons name="people-outline" size={64} color="#ddd" />
+                <Text style={styles.emptyTabTitle}>No Collaborations Yet</Text>
+                <Text style={styles.emptyTabSubtitle}>Collaborative projects and partnerships will appear here</Text>
+              </View>
             </View>
           )}
         </View>
       </ScrollView>
+
+      {/* UGC Actions Bottom Sheet */}
+      <BottomSheet
+        ref={ugcActionsSheetRef}
+        index={-1}
+        snapPoints={['40%', '50%']}
+        enablePanDownToClose={true}
+        backgroundStyle={{ backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20 }}
+        handleIndicatorStyle={{ backgroundColor: '#ccc' }}
+      >
+        <View style={[styles.ugcActionsContainer, { paddingBottom: Math.max(insets.bottom, 20) }]}>
+          <View style={styles.ugcActionsHeader}>
+            <Text style={styles.ugcActionsTitle}>Actions</Text>
+            <TouchableOpacity onPress={() => ugcActionsSheetRef.current?.close()}>
+              <Ionicons name="close" size={24} color="#333" />
+            </TouchableOpacity>
+          </View>
+
+          {/* Report Vendor */}
+          <TouchableOpacity
+            style={styles.ugcActionItem}
+            onPress={async () => {
+              try {
+                if (vendor && userData?.id) {
+                  await supabase.from('ugc_reports').insert({
+                    reporter_id: userData.id,
+                    target_user_id: vendor.user_id || null,
+                    vendor_id: vendor.id,
+                    reason: 'inappropriate',
+                  });
+                  Toast.show({
+                    type: 'success',
+                    text1: 'Reported',
+                    text2: 'Thanks for keeping Only2U safe.'
+                  });
+                  ugcActionsSheetRef.current?.close();
+                }
+              } catch (error) {
+                Toast.show({ type: 'error', text1: 'Error', text2: 'Failed to report' });
+              }
+            }}
+          >
+            <View style={styles.ugcActionIconContainer}>
+              <Ionicons name="flag" size={22} color="#EF4444" />
+            </View>
+            <View style={styles.ugcActionTextContainer}>
+              <Text style={styles.ugcActionTitle}>Report Vendor</Text>
+              <Text style={styles.ugcActionSubtitle}>Report this vendor</Text>
+            </View>
+          </TouchableOpacity>
+
+          {/* Not Interested */}
+          <TouchableOpacity
+            style={styles.ugcActionItem}
+            onPress={() => {
+              Toast.show({
+                type: 'success',
+                text1: 'Noted',
+                text2: "We'll show you less like this"
+              });
+              ugcActionsSheetRef.current?.close();
+            }}
+          >
+            <View style={styles.ugcActionIconContainer}>
+              <Ionicons name="eye-off" size={22} color="#6B7280" />
+            </View>
+            <View style={styles.ugcActionTextContainer}>
+              <Text style={styles.ugcActionTitle}>Not Interested</Text>
+              <Text style={styles.ugcActionSubtitle}>See fewer posts like this</Text>
+            </View>
+          </TouchableOpacity>
+
+          {/* Block Vendor */}
+          <TouchableOpacity
+            style={styles.ugcActionItem}
+            onPress={async () => {
+              try {
+                if (vendor && userData?.id) {
+                  const vendorName = vendor.business_name || 'Unknown Vendor';
+
+                  // Try to block by vendor user_id if available
+                  if (vendor.user_id) {
+                    // Check if already blocked by user_id
+                    const { data: existing } = await supabase
+                      .from('blocked_users')
+                      .select('id')
+                      .eq('user_id', userData.id)
+                      .eq('blocked_user_id', vendor.user_id)
+                      .single();
+
+                    if (existing) {
+                      Toast.show({
+                        type: 'info',
+                        text1: 'Already Blocked',
+                        text2: 'This vendor is already blocked'
+                      });
+                      ugcActionsSheetRef.current?.close();
+                      return;
+                    }
+
+                    // Insert block record with user_id
+                    const blockPayload: any = {
+                      user_id: userData.id,
+                      blocked_user_id: vendor.user_id,
+                      reason: 'Blocked from vendor profile'
+                    };
+                    if (supportsVendorNameBlocking) {
+                      blockPayload.blocked_vendor_name = vendorName;
+                    }
+                    const { error } = await supabase.from('blocked_users').insert(blockPayload);
+
+                    if (error) {
+                      console.error('Block error:', error);
+                      throw error;
+                    }
+
+                    setBlockedUserIds([...blockedUserIds, vendor.user_id]);
+                    if (supportsVendorNameBlocking) {
+                      setBlockedVendorNames([...blockedVendorNames, vendorName]);
+                    }
+                  } else {
+                    if (!supportsVendorNameBlocking) {
+                      Toast.show({
+                        type: 'info',
+                        text1: 'Upgrade required',
+                        text2: 'Vendor name blocking is not available in this build.',
+                      });
+                      return;
+                    }
+                    // Block by vendor name only
+                    // Check if already blocked by vendor name
+                    const { data: existing } = await supabase
+                      .from('blocked_users')
+                      .select('id')
+                      .eq('user_id', userData.id)
+                      .eq('blocked_vendor_name', vendorName)
+                      .single();
+
+                    if (existing) {
+                      Toast.show({
+                        type: 'info',
+                        text1: 'Already Blocked',
+                        text2: 'This vendor is already blocked'
+                      });
+                      ugcActionsSheetRef.current?.close();
+                      return;
+                    }
+
+                    // Insert block record with vendor name
+                    const { error } = await supabase.from('blocked_users').insert({
+                      user_id: userData.id,
+                      blocked_vendor_name: vendorName,
+                      reason: 'Blocked from vendor profile'
+                    });
+
+                    if (error) {
+                      console.error('Block error:', error);
+                      throw error;
+                    }
+
+                    setBlockedVendorNames([...blockedVendorNames, vendorName]);
+                  }
+
+                  Toast.show({
+                    type: 'success',
+                    text1: 'Blocked',
+                    text2: `You won't see content from "${vendorName}"`
+                  });
+                  ugcActionsSheetRef.current?.close();
+                  // Navigate back after blocking
+                  navigation.goBack();
+                }
+              } catch (error) {
+                console.error('Block vendor error:', error);
+                Toast.show({ type: 'error', text1: 'Error', text2: 'Failed to block vendor' });
+              }
+            }}
+          >
+            <View style={styles.ugcActionIconContainer}>
+              <Ionicons name="ban" size={22} color="#DC2626" />
+            </View>
+            <View style={styles.ugcActionTextContainer}>
+              <Text style={styles.ugcActionTitle}>Block Vendor</Text>
+              <Text style={styles.ugcActionSubtitle}>You won't see their products</Text>
+            </View>
+          </TouchableOpacity>
+
+        </View>
+      </BottomSheet>
     </SafeAreaView>
   );
 };
@@ -1122,37 +1705,128 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
+  // Instagram-Style Profile Header Styles
   profileHeader: {
     padding: 16,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
   },
-  profileInfo: {
+  profileInfoRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 12,
   },
   profileImage: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    marginRight: 20,
+    width: 86,
+    height: 86,
+    borderRadius: 43,
+    marginRight: 16,
+    borderWidth: 2,
+    borderColor: '#f0f0f0',
   },
-  statsContainer: {
-    flexDirection: 'row',
+  statsRow: {
     flex: 1,
+    flexDirection: 'row',
     justifyContent: 'space-around',
   },
   statItem: {
     alignItems: 'center',
   },
   statNumber: {
-    fontSize: 20,
-    fontWeight: '700',
+    fontSize: 18,
+    fontWeight: 'bold',
     color: '#000',
   },
   statLabel: {
+    fontSize: 13,
+    color: '#999',
+    marginTop: 2,
+  },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  bio: {
     fontSize: 14,
+    color: '#333',
+    lineHeight: 20,
+    marginBottom: 4,
+  },
+  locationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    gap: 4,
+  },
+  locationText: {
+    fontSize: 13,
     color: '#666',
-    marginTop: 4,
+  },
+  socialLinksRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 12,
+  },
+  socialLinkChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f0f0f0',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    gap: 4,
+  },
+  socialLinkText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#333',
+  },
+  actionButtonsRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  primaryActionButton: {
+    flex: 1,
+    backgroundColor: '#F53F7A',
+    paddingVertical: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#F53F7A',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  primaryActionButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+    letterSpacing: 0.2,
+  },
+  secondaryActionButton: {
+    flex: 1,
+    backgroundColor: '#f0f0f0',
+    paddingVertical: 8,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  secondaryActionButtonText: {
+    color: '#000',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  iconActionButton: {
+    backgroundColor: '#f0f0f0',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   profileDetails: {
     marginBottom: 16,
@@ -1187,24 +1861,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     marginBottom: 16,
   },
-  followButton: {
-    flex: 1,
-    backgroundColor: '#F53F7A',
-    paddingVertical: 8,
-    borderRadius: 6,
-    marginRight: 8,
-  },
   followingButton: {
-    backgroundColor: '#f0f0f0',
-  },
-  followButtonText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-    textAlign: 'center',
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#F53F7A',
   },
   followingButtonText: {
-    color: '#000',
+    color: '#F53F7A',
   },
   shopHeaderButton: {
     flex: 1,
@@ -1270,107 +1933,153 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
+    paddingHorizontal: 8,
   },
-  productCardWrap: {
-    width: (width - 16 * 2 - 12) / 2,
+  productCard: {
+    width: 138,
+    marginHorizontal: 2,
     backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#f0f0f0',
-    borderRadius: 12,
-    marginBottom: 12,
+    borderRadius: 8,
     overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#eee',
+    shadowColor: '#000',
+    shadowOpacity: 0.04,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
+    position: 'relative',
   },
-  productCardImage: {
+  discountBadge: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
+    backgroundColor: '#F53F7A',
+    borderRadius: 12,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    zIndex: 1,
+  },
+  discountBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  productImage: {
     width: '100%',
-    height: Math.round(((width - 16 * 2 - 12) / 2) * 1.25),
-    backgroundColor: '#fafafa',
+    height: 160,
+    resizeMode: 'cover',
   },
-  productCardInfo: {
-    padding: 10,
+  brandName: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#1a1a1a',
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    textTransform: 'uppercase',
   },
-  productCardName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#111',
+  productName: {
+    fontSize: 13,
+    fontWeight: '400',
+    color: '#666',
+    paddingHorizontal: 12,
+    paddingTop: 2,
+    lineHeight: 16,
   },
-  priceRow: {
+  priceContainer: {
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    paddingHorizontal: 12,
+    paddingBottom: 12,
+    paddingTop: 6,
+  },
+  priceInfo: {
     flexDirection: 'row',
     alignItems: 'center',
     flexWrap: 'wrap',
-    marginTop: 4,
     gap: 6,
   },
-  productCardPrice: {
-    color: '#111',
-    fontWeight: '700',
-  },
-  originalPriceSmall: {
-    color: '#999',
-    textDecorationLine: 'line-through',
-    fontSize: 12,
-  },
-  discountChip: {
-    color: '#4CAF50',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  ratingRow: {
+  discountAndRatingRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
     marginTop: 6,
+  },
+  price: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1a1a1a',
+  },
+  originalPrice: {
+    fontSize: 12,
+    color: '#94a3b8',
+    textDecorationLine: 'line-through',
+  },
+  discountPercentage: {
+    fontSize: 11,
+    fontWeight: 'bold',
+    color: '#F53F7A',
+    backgroundColor: 'rgba(245, 63, 122, 0.12)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 12,
+  },
+  reviewsContainer: {
+    backgroundColor: '#fff',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 12,
     gap: 4,
   },
-  ratingText: {
-    color: '#111',
-    fontSize: 12,
+  reviews: {
+    fontSize: 11,
     fontWeight: '700',
+    color: '#333',
   },
-  reviewsText: {
-    color: '#666',
-    fontSize: 12,
-  },
-  productCardActions: {
-    flexDirection: 'row',
-    marginTop: 8,
-    gap: 8,
-  },
-  productTryOnBtn: {
-    flex: 1,
-    backgroundColor: '#f0f0f0',
-    paddingVertical: 8,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  productTryOnText: {
-    color: '#000',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  productShopBtn: {
-    flex: 1,
-    backgroundColor: '#F53F7A',
-    paddingVertical: 8,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  productShopText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  tabBar: {
-    flexDirection: 'row',
+  // Instagram-like Tab Bar Styles
+  tabBarContainer: {
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
+    backgroundColor: '#fff',
   },
-  tab: {
+  tabBarInner: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+  },
+  tabItem: {
     flex: 1,
     alignItems: 'center',
     paddingVertical: 12,
+    position: 'relative',
   },
-  activeTab: {
-    borderBottomWidth: 2,
-    borderBottomColor: '#000',
+  activeTabItem: {
+    // Active state
+  },
+  tabText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#999',
+    marginTop: 4,
+    letterSpacing: 0.5,
+  },
+  activeTabText: {
+    color: '#000',
+  },
+  tabIndicator: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 1,
+    backgroundColor: '#000',
+  },
+  tabContent: {
+    flex: 1,
   },
   postContainer: {
     borderBottomWidth: 1,
@@ -1409,60 +2118,40 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     marginBottom: 12,
   },
-  productCard: {
+  postProductCard: {
     flexDirection: 'row',
-    backgroundColor: '#f8f8f8',
-    borderRadius: 8,
+    backgroundColor: '#fff',
+    borderRadius: 12,
     padding: 12,
     marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#eee',
+    shadowColor: '#000',
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
   },
-  productImage: {
+  postProductImage: {
     width: 80,
     height: 80,
-    borderRadius: 8,
+    borderRadius: 10,
     marginRight: 12,
   },
-  productInfo: {
+  postProductInfo: {
     flex: 1,
-    justifyContent: 'space-between',
+    justifyContent: 'center',
   },
-  productName: {
+  postProductName: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#000',
-    marginBottom: 4,
+    color: '#111',
+    marginBottom: 6,
   },
-  productPrice: {
-    fontSize: 16,
+  postProductPrice: {
+    fontSize: 13,
     fontWeight: '700',
-    color: '#000',
-    marginBottom: 8,
-  },
-  productActions: {
-    flexDirection: 'row',
-  },
-  tryOnButton: {
-    backgroundColor: '#000',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 4,
-    marginRight: 8,
-  },
-  tryOnButtonText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  shopNowButton: {
-    backgroundColor: '#f0f0f0',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 4,
-  },
-  shopNowButtonText: {
-    color: '#000',
-    fontSize: 12,
-    fontWeight: '600',
+    color: '#F53F7A',
   },
   postActions: {
     flexDirection: 'row',
@@ -1494,6 +2183,92 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.6)',
     borderRadius: 12,
     padding: 4,
+  },
+  // Grid Styles
+  gridContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    padding: 0,
+  },
+  gridItem: {
+    width: width / 3,
+    height: width / 3,
+    position: 'relative',
+    borderWidth: 0.5,
+    borderColor: '#fff',
+  },
+  gridImage: {
+    width: '100%',
+    height: '100%',
+  },
+  multipleIndicator: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+  },
+  // Empty Tab States
+  emptyTabState: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 80,
+    paddingHorizontal: 40,
+  },
+  emptyTabTitle: {
+    fontSize: 22,
+    fontWeight: '600',
+    color: '#333',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  emptyTabSubtitle: {
+    fontSize: 14,
+    color: '#999',
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  // Tab Grids
+  postsGrid: {
+    flex: 1,
+  },
+  productsContainer: {
+    flex: 1,
+  },
+  productsHorizontalList: {
+    paddingHorizontal: 16,
+  },
+  categorySection: {
+    marginBottom: 24,
+  },
+  categoryHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    marginBottom: 12,
+  },
+  categoryTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#111',
+  },
+  seeMoreButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  seeMoreText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#F53F7A',
+    marginRight: 2,
+  },
+  taggedGrid: {
+    flex: 1,
+  },
+  collaborationsGrid: {
+    flex: 1,
   },
   taggedContainer: {
     flex: 1,
@@ -1688,6 +2463,50 @@ const styles = StyleSheet.create({
   },
   disabledButton: {
     backgroundColor: '#ccc',
+  },
+  // UGC Actions Bottom Sheet Styles
+  ugcActionsContainer: {
+    padding: 20,
+  },
+  ugcActionsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  ugcActionsTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#333',
+  },
+  ugcActionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  ugcActionIconContainer: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#f5f5f5',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
+  },
+  ugcActionTextContainer: {
+    flex: 1,
+  },
+  ugcActionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 4,
+  },
+  ugcActionSubtitle: {
+    fontSize: 14,
+    color: '#666',
   },
 });
 

@@ -1,0 +1,296 @@
+================================================================================
+INSTRUCTIONS FOR REORDERING MOBILE APP HOME SCREEN LAYOUT
+================================================================================
+
+SYSTEM OVERVIEW:
+This admin panel controls the order of sections and categories on the mobile app
+home screen through drag-and-drop. Changes made in admin panel automatically 
+reflect in the mobile app.
+
+================================================================================
+SECTION 1: HOME SCREEN SECTION ORDERING
+================================================================================
+
+PURPOSE:
+Control which major sections appear first on mobile app home screen:
+- ⭐ Best Sellers section
+- 🔥 Trending Now section  
+- 📦 Categories section
+
+HOW TO ACCESS:
+1. Open admin panel
+2. Click "Inventory Management" in sidebar
+3. Click "Home Screen Order" tab (middle tab)
+
+HOW TO REORDER:
+1. You will see 3 large colored cards:
+   - Purple card = Best Sellers section
+   - Blue card = Trending Now section
+   - Green card = Categories section
+
+2. Each card has ≡ icon on the left side (drag handle)
+
+3. To reorder:
+   - Click and hold the ≡ icon
+   - Drag card up or down
+   - Release to drop in new position
+   - Order saves automatically
+
+4. Preview at top shows: "1. [Section] → 2. [Section] → 3. [Section]"
+
+HOW TO HIDE/SHOW:
+- Each card has "Hide" or "Show" button on right
+- Click "Hide" to remove section from mobile app
+- Click "Show" to display section in mobile app
+
+DEFAULT ORDER:
+1. Best Sellers (position 0)
+2. Trending Now (position 1)
+3. Categories (position 2)
+
+MOBILE APP SHOWS:
+Sections appear top-to-bottom in the order you set in admin panel.
+
+================================================================================
+SECTION 2: CATEGORY ORDERING
+================================================================================
+
+PURPOSE:
+Control the order categories appear within the Categories section.
+
+HOW TO ACCESS:
+1. Open admin panel
+2. Click "Inventory Management" in sidebar
+3. Click "Categories" tab (first tab)
+
+HOW TO REORDER:
+1. You will see list of category cards
+
+2. Each card has ≡ icon on left side (drag handle)
+
+3. To reorder:
+   - Click and hold the ≡ icon
+   - Drag category up or down
+   - Release to drop in new position
+   - Order saves automatically
+
+MOBILE APP SHOWS:
+Categories appear in the Categories section in the order you set.
+
+================================================================================
+COMMON SCENARIOS
+================================================================================
+
+SCENARIO 1: "Make Trending appear first on home screen"
+SOLUTION:
+1. Go to: Inventory Management → Home Screen Order tab
+2. Find the blue "Trending Now" card
+3. Drag it to the top (above Best Sellers)
+4. Done! Mobile app now shows Trending first.
+
+SCENARIO 2: "Make 'New Arrivals' category appear first"
+SOLUTION:
+1. Go to: Inventory Management → Categories tab
+2. Find "New Arrivals" category
+3. Drag it to the top
+4. Done! Mobile app shows "New Arrivals" first in categories.
+
+SCENARIO 3: "Hide the Trending section temporarily"
+SOLUTION:
+1. Go to: Inventory Management → Home Screen Order tab
+2. Find "Trending Now" card
+3. Click "Hide" button
+4. Done! Trending section removed from mobile app.
+
+SCENARIO 4: "Show Best Sellers first, then Categories, hide Trending"
+SOLUTION:
+1. Go to: Home Screen Order tab
+2. Ensure Best Sellers is at position #1 (should be by default)
+3. Click "Hide" on Trending Now card
+4. Categories automatically moves to position #2
+5. Done! Mobile app shows: Best Sellers → Categories (no Trending)
+
+================================================================================
+MOBILE APP INTEGRATION CODE
+================================================================================
+
+FETCH HOME SCREEN SECTIONS IN ORDER:
+```
+const { data: sections } = await supabase
+  .from('feature_sections')
+  .select('*')
+  .eq('is_active', true)
+  .order('display_order', { ascending: true });
+```
+
+FETCH CATEGORIES IN ORDER:
+```
+const { data: categories } = await supabase
+  .from('categories')
+  .select('*')
+  .eq('is_active', true)
+  .order('display_order', { ascending: true, nullsFirst: false });
+```
+
+FETCH BEST SELLERS:
+```
+const { data: bestSellers } = await supabase
+  .from('products')
+  .select('*')
+  .eq('featured_type', 'best_seller')
+  .eq('is_active', true)
+  .limit(10);
+```
+
+FETCH TRENDING:
+```
+const { data: trending } = await supabase
+  .from('products')
+  .select('*')
+  .eq('featured_type', 'trending')
+  .eq('is_active', true)
+  .limit(10);
+```
+
+BUILD HOME SCREEN:
+```
+for (const section of sections) {
+  if (section.section_type === 'best_seller') {
+    render Best Sellers section with products
+  }
+  else if (section.section_type === 'trending') {
+    render Trending section with products
+  }
+  else if (section.section_type === 'categories') {
+    render Categories section with categories (in category order)
+  }
+}
+```
+
+================================================================================
+VISUAL GUIDE
+================================================================================
+
+ADMIN PANEL - HOME SCREEN ORDER TAB:
+┌──────────────────────────────────────┐
+│  Current Order Preview:               │
+│  1. Best Sellers → 2. Trending → 3. Categories │
+├──────────────────────────────────────┤
+│  ≡  ⭐ Best Sellers         [Hide]   │ ← Drag this
+│  ≡  🔥 Trending Now        [Hide]   │ ← Drag this
+│  ≡  📦 Shop by Category    [Hide]   │ ← Drag this
+└──────────────────────────────────────┘
+
+ADMIN PANEL - CATEGORIES TAB:
+┌──────────────────────────────────────┐
+│  ≡  Clothing        [Edit] [Delete]  │ ← Drag this
+│  ≡  Footwear        [Edit] [Delete]  │ ← Drag this
+│  ≡  Accessories     [Edit] [Delete]  │ ← Drag this
+└──────────────────────────────────────┘
+
+MOBILE APP HOME SCREEN RESULT:
+┌──────────────────────────────────────┐
+│  [Section in position #1]            │
+│  ┌───┬───┬───┬───┐                  │
+│  │   │   │   │   │                  │
+│  └───┴───┴───┴───┘                  │
+│                                      │
+│  [Section in position #2]            │
+│  ┌───┬───┬───┬───┐                  │
+│  │   │   │   │   │                  │
+│  └───┴───┴───┴───┘                  │
+│                                      │
+│  [Section in position #3]            │
+│  ┌───┬───┬───┬───┐                  │
+│  │   │   │   │   │                  │
+│  └───┴───┴───┴───┘                  │
+└──────────────────────────────────────┘
+
+================================================================================
+IMPORTANT NOTES
+================================================================================
+
+1. AUTOMATIC SAVING:
+   - All changes save immediately on drop
+   - No "Save" button needed
+   - Refresh page to verify order persisted
+
+2. MOBILE APP REFRESH:
+   - Changes don't require app update/deployment
+   - User must pull-to-refresh or restart app to see changes
+   - Consider implementing auto-refresh every X minutes
+
+3. DEFAULT STATE:
+   - Best Sellers: Position #1, Active
+   - Trending: Position #2, Active
+   - Categories: Position #3, Active
+
+4. DRAG HANDLE:
+   - Look for ≡ icon (three horizontal lines)
+   - Cursor changes to hand/grab when hovering
+   - Click and hold to drag
+
+5. DATABASE MIGRATIONS REQUIRED:
+   - Run migrations/001_add_display_order_to_categories.sql (for categories)
+   - Run migrations/005_create_feature_type_ordering.sql (for sections)
+   - Must run in Supabase SQL Editor before using feature
+
+================================================================================
+TROUBLESHOOTING
+================================================================================
+
+PROBLEM: "I can't drag anything"
+SOLUTION: 
+- Check if migrations have been run in Supabase
+- Hard refresh browser (Ctrl+Shift+R or Cmd+Shift+R)
+- Check browser console for errors
+
+PROBLEM: "Changes don't save"
+SOLUTION:
+- Check network tab in browser for failed API calls
+- Verify Supabase connection is working
+- Try refreshing page and dragging again
+
+PROBLEM: "Mobile app doesn't show new order"
+SOLUTION:
+- Ensure mobile app queries include ORDER BY display_order
+- Pull to refresh in mobile app
+- Restart mobile app completely
+- Verify mobile app is fetching from feature_sections table
+
+PROBLEM: "Section disappeared"
+SOLUTION:
+- You likely clicked "Hide" - it's hidden from mobile app
+- Go to Home Screen Order tab
+- Find section with "Hidden" status
+- Click "Show" button
+
+================================================================================
+EXAMPLE WORKFLOW
+================================================================================
+
+GOAL: Promote trending items first for new collection launch
+
+STEPS:
+1. Log into admin panel
+2. Navigate to: Inventory Management
+3. Click: "Home Screen Order" tab
+4. Find: Blue card labeled "🔥 Trending Now"
+5. Click and hold: The ≡ icon on the left of the card
+6. Drag: Card upward above "Best Sellers"
+7. Release: Drop in position #1
+8. Observe: Position number updates to "Position: #1"
+9. Check: Preview at top shows "1. Trending Now → 2. Best Sellers → ..."
+10. Done! Mobile app will now show Trending section first.
+
+MOBILE APP RESULT:
+- Home screen shows Trending Now at the top
+- Best Sellers appears second
+- Categories appears third
+
+================================================================================
+END OF INSTRUCTIONS
+================================================================================
+
+For detailed technical documentation, see COMPLETE_REORDERING_GUIDE.md
+

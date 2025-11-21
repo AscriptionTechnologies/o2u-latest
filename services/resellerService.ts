@@ -10,6 +10,40 @@ import type {
   Product 
 } from '~/types/reseller';
 
+interface ResellerCheckoutItemInput {
+  productId: string | null;
+  variantId?: string | null;
+  quantity: number;
+  baseUnitPrice: number;
+  resellerUnitPrice: number;
+  baseTotal: number;
+  resellerTotal: number;
+  marginAmount: number;
+}
+
+interface ResellerCheckoutSyncPayload {
+  userId: string;
+  orderId: string;
+  orderNumber?: string | null;
+  paymentMethod: string | null | undefined;
+  paymentStatus: 'pending' | 'paid';
+  totals: {
+    originalTotal: number;
+    resellerTotal: number;
+    totalProfit: number;
+  };
+  items: ResellerCheckoutItemInput[];
+  customer: {
+    name: string;
+    phone?: string | null;
+    email?: string | null;
+    address?: string | null;
+    city?: string | null;
+    state?: string | null;
+    pincode?: string | null;
+  };
+}
+
 export class ResellerService {
   // ===========================
   // RESELLER REGISTRATION
@@ -74,6 +108,55 @@ export class ResellerService {
       console.error('Error fetching reseller:', error);
       throw error;
     }
+  }
+
+  private static async ensureResellerForUser(userId: string): Promise<Reseller> {
+    const existing = await this.getResellerByUserId(userId);
+    if (existing) {
+      return existing;
+    }
+
+    const { data: userProfile } = await supabase
+      .from('users')
+      .select('id, name, email, phone, address, city, state, postal_code')
+      .eq('id', userId)
+      .maybeSingle();
+    
+    const { data: authUserResponse } = await supabase.auth.getUser();
+    const authUser = authUserResponse?.user;
+
+    const businessName = userProfile?.name || authUser?.email || 'Reseller';
+    const phone = userProfile?.phone || authUser?.phone || null;
+    const email = userProfile?.email || authUser?.email || null;
+
+    const { data: newReseller, error: insertError } = await supabase
+      .from('resellers')
+      .insert({
+        user_id: userId,
+        business_name: businessName,
+        business_type: 'individual',
+        phone,
+        email,
+        address: userProfile?.address || null,
+        city: userProfile?.city || null,
+        state: userProfile?.state || null,
+        pincode: (userProfile as any)?.postal_code || null,
+        is_verified: false,
+        is_active: true,
+        commission_rate: 20,
+        total_earnings: 0,
+        total_orders: 0,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .select('*')
+      .single();
+
+    if (insertError || !newReseller) {
+      throw insertError || new Error('Unable to create reseller profile');
+    }
+
+    return newReseller as Reseller;
   }
 
   static async updateResellerProfile(resellerId: string, updates: Partial<Reseller>): Promise<Reseller> {
@@ -497,6 +580,164 @@ export class ResellerService {
     }
   }
 
+  static async logResellerOrderFromCheckout(payload: ResellerCheckoutSyncPayload): Promise<void> {
+    try {
+      if (!payload.userId || payload.items.length === 0) {
+        return;
+      }
+
+      const reseller = await this.ensureResellerForUser(payload.userId);
+
+      const resellerOrderNumber = payload.orderNumber && payload.orderNumber.trim().length > 0
+        ? `RS-${payload.orderNumber}`
+        : `RS${Date.now().toString(36).toUpperCase()}`;
+
+      const originalTotal = Number(payload.totals.originalTotal || 0);
+      const resellerTotal = Number(payload.totals.resellerTotal || originalTotal);
+      const resellerCommission = Math.max(0, Number(payload.totals.totalProfit || resellerTotal - originalTotal));
+      const platformCommission = Math.max(0, resellerTotal - resellerCommission);
+
+      const customerAddress = payload.customer.address || 'Not provided';
+      const customerCity = payload.customer.city || 'N/A';
+      const customerState = payload.customer.state || 'N/A';
+      const customerPincode = payload.customer.pincode || 'N/A';
+
+      const baseOrderRecord = {
+        reseller_id: reseller.id,
+        customer_id: payload.userId,
+        customer_name: payload.customer.name,
+        customer_phone: payload.customer.phone || 'N/A',
+        customer_email: payload.customer.email || null,
+        customer_address: customerAddress,
+        customer_city: customerCity,
+        customer_state: customerState,
+        customer_pincode: customerPincode,
+        total_amount: resellerTotal,
+        reseller_commission: resellerCommission,
+        platform_commission: platformCommission,
+        status: payload.paymentStatus === 'paid' ? 'confirmed' : 'pending',
+        payment_status: payload.paymentStatus,
+        payment_method: payload.paymentMethod ?? null,
+        notes: `Primary order ID: ${payload.orderId}`,
+        updated_at: new Date().toISOString(),
+      };
+
+      const { data: existingOrder, error: existingOrderError } = await supabase
+        .from('reseller_orders')
+        .select('id, reseller_commission')
+        .eq('order_number', resellerOrderNumber)
+        .maybeSingle();
+
+      if (existingOrderError) {
+        throw existingOrderError;
+      }
+
+      let resellerOrderId: string;
+      let commissionDelta = resellerCommission;
+
+      if (existingOrder) {
+        const { data: updatedOrder, error: updateError } = await supabase
+          .from('reseller_orders')
+          .update(baseOrderRecord)
+          .eq('id', existingOrder.id)
+          .select('id')
+          .single();
+
+        if (updateError) {
+          throw updateError;
+        }
+
+        resellerOrderId = updatedOrder.id;
+        commissionDelta = resellerCommission - Number(existingOrder.reseller_commission || 0);
+
+        await supabase
+          .from('reseller_order_items')
+          .delete()
+          .eq('order_id', resellerOrderId);
+      } else {
+        const { data: insertedOrder, error: insertError } = await supabase
+          .from('reseller_orders')
+          .insert({
+            order_number: resellerOrderNumber,
+            ...baseOrderRecord,
+            created_at: new Date().toISOString(),
+          })
+          .select('id')
+          .single();
+
+        if (insertError) {
+          throw insertError;
+        }
+
+        resellerOrderId = insertedOrder.id;
+      }
+
+      const orderItemsPayload = payload.items
+        .filter(item => item.productId)
+        .map(item => ({
+          order_id: resellerOrderId,
+          product_id: item.productId,
+          variant_id: item.variantId ?? null,
+          quantity: item.quantity,
+          unit_price: item.baseUnitPrice,
+          total_price: item.baseTotal,
+          reseller_price: item.resellerUnitPrice,
+          margin_amount: item.marginAmount,
+          created_at: new Date().toISOString(),
+        }));
+
+      if (orderItemsPayload.length > 0) {
+        const { error: resellerItemsError } = await supabase
+          .from('reseller_order_items')
+          .insert(orderItemsPayload);
+
+        if (resellerItemsError) {
+          throw resellerItemsError;
+        }
+      }
+
+      if (resellerCommission > 0) {
+        const { error: earningsError } = await supabase
+          .from('reseller_earnings')
+          .upsert({
+            reseller_id: reseller.id,
+            order_id: resellerOrderId,
+            earning_type: 'commission',
+            amount: resellerCommission,
+            description: `Commission for order ${resellerOrderNumber}`,
+            status: payload.paymentStatus === 'paid' ? 'paid' : 'pending',
+            paid_at: payload.paymentStatus === 'paid' ? new Date().toISOString() : null,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          }, {
+            onConflict: 'reseller_id,order_id,earning_type',
+          });
+
+        if (earningsError) {
+          throw earningsError;
+        }
+      }
+
+      if (commissionDelta !== 0 || !existingOrder) {
+        await supabase
+          .from('resellers')
+          .update({
+            total_orders: (reseller.total_orders || 0) + (existingOrder ? 0 : 1),
+            total_earnings: (reseller.total_earnings || 0) + commissionDelta,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', reseller.id);
+      }
+    } catch (error: any) {
+      if (error?.code === '42501' || /row-level security/i.test(error?.message || '')) {
+        console.warn('[ResellerService] Skipping reseller order log due to RLS policy:', error?.message || error);
+        return;
+      }
+      console.error('[ResellerService] Failed to log reseller order from checkout:', error);
+      throw error;
+    }
+  }
+
   // ===========================
   // DASHBOARD & ANALYTICS
   // ===========================
@@ -526,8 +767,15 @@ export class ResellerService {
       if (earningsResult.error) throw earningsResult.error;
 
       const products = productsResult.data || [];
-      const orders = ordersResult.data || [];
-      const earnings = earningsResult.data || [];
+      const orders = (ordersResult.data || []).map(order => ({
+        ...order,
+        total_amount: Number(order.total_amount || 0),
+        reseller_commission: Number(order.reseller_commission || 0),
+      }));
+      const earnings = (earningsResult.data || []).map(earning => ({
+        ...earning,
+        amount: Number(earning.amount || 0),
+      }));
 
       const totalProducts = products.length;
       const activeProducts = products.filter(p => p.is_active).length;

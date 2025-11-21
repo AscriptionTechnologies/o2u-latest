@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, View, Text, Button, Linking } from 'react-native';
+import { ActivityIndicator, View, Text, Button, Linking, Platform } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { useTranslation } from 'react-i18next';
 
 import TabNavigator from './tab-navigator';
 import { supabase } from '~/utils/supabase';
@@ -29,66 +28,70 @@ import RefundPolicy from '~/screens/RefundPolicy';
 import General from '~/components/Profile/General';
 import Account from '~/components/Profile/Account';
 import Reviews from '~/components/Profile/Reviews';
+import YourEarnings from '~/components/Profile/YourEarnings';
 import FaceSwapScreen from '~/screens/FaceSwap';
 import PersonalizedProductResult from '~/screens/PersonalizedProductResult';
 import Checkout from '~/screens/Checkout';
 import AddressBook from '~/screens/AddressBook';
+import AddAddress from '~/screens/AddAddress';
 import VendorProfile from '~/screens/VendorProfile';
 import ResellerRegistration from '~/screens/ResellerRegistration';
-import ResellerDashboardSimple from '~/screens/ResellerDashboardSimple';
+import ResellerDashboard from '~/screens/ResellerDashboard';
 import CatalogShare from '~/screens/CatalogShare';
+import Products from '~/screens/Products';
+import VendorDashboard from '~/screens/VendorDashboard';
 import ProductDetails from '~/screens/ProductDetails';
+import OrderDetails from '~/screens/OrderDetails';
 import { useUser } from '~/contexts/UserContext';
+import MessagesScreen from '~/screens/Messages';
+import ChatThread from '~/screens/ChatThread';
+import FriendSearch from '~/screens/FriendSearch';
 
 const Stack = createNativeStackNavigator();
 
 const Navigation = () => {
-  const { t } = useTranslation();
   return (
-    <Stack.Navigator initialRouteName="TabNavigator" screenOptions={{ headerShown: false }}>
+    <Stack.Navigator 
+      initialRouteName="TabNavigator" 
+      screenOptions={{ 
+        headerShown: false,
+        animation: 'slide_from_right',
+        animationDuration: 250,
+        gestureEnabled: true,
+        fullScreenGestureEnabled: true,
+        customAnimationOnGesture: true,
+      }}
+    >
       <Stack.Screen name="TabNavigator" component={TabNavigator} />
       <Stack.Screen
         name="PrivacyAndSecurity"
         component={PrivacyAndSecurity}
-        options={{ title: t('privacy_and_security'), headerBackTitle: t('profile') }}
       />
-      <Stack.Screen
-        name="PrivacyPolicy"
-        component={PrivacyPolicy}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="TermsAndConditions"
-        component={TermsAndConditions}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="RefundPolicy"
-        component={RefundPolicy}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="MessageDetail"
-        component={MessageDetail}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="Notifications"
-        component={Notifications}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen name="General" component={General} options={{ headerShown: false }} />
-      <Stack.Screen name="Account" component={Account} options={{ headerShown: false }} />
-      <Stack.Screen name="Reviews" component={Reviews} options={{ headerShown: false }} />
-      <Stack.Screen name="FaceSwap" component={FaceSwapScreen} options={{ headerShown: false }} />
-      <Stack.Screen name="PersonalizedProductResult" component={PersonalizedProductResult} options={{ headerShown: false }} />
-      <Stack.Screen name="Checkout" component={Checkout} options={{ headerShown: false }} />
-      <Stack.Screen name="AddressBook" component={AddressBook} options={{ headerShown: false }} />
-      <Stack.Screen name="VendorProfile" component={VendorProfile} options={{ headerShown: false }} />
-      <Stack.Screen name="ResellerRegistration" component={ResellerRegistration} options={{ headerShown: false }} />
-      <Stack.Screen name="ResellerDashboard" component={ResellerDashboardSimple} options={{ headerShown: false }} />
-      <Stack.Screen name="CatalogShare" component={CatalogShare} options={{ headerShown: false }} />
-      <Stack.Screen name="ProductDetails" component={ProductDetails} options={{ headerShown: false }} />
+      <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicy} />
+      <Stack.Screen name="TermsAndConditions" component={TermsAndConditions} />
+      <Stack.Screen name="RefundPolicy" component={RefundPolicy} />
+      <Stack.Screen name="MessageDetail" component={MessageDetail} />
+      <Stack.Screen name="Notifications" component={Notifications} />
+      <Stack.Screen name="General" component={General} />
+      <Stack.Screen name="Account" component={Account} />
+      <Stack.Screen name="Reviews" component={Reviews} />
+      <Stack.Screen name="YourEarnings" component={YourEarnings} />
+      <Stack.Screen name="FaceSwap" component={FaceSwapScreen} />
+      <Stack.Screen name="PersonalizedProductResult" component={PersonalizedProductResult} />
+      <Stack.Screen name="Checkout" component={Checkout} />
+      <Stack.Screen name="AddressBook" component={AddressBook} />
+      <Stack.Screen name="AddAddress" component={AddAddress} />
+      <Stack.Screen name="VendorProfile" component={VendorProfile} />
+      <Stack.Screen name="VendorDashboard" component={VendorDashboard} />
+      <Stack.Screen name="ResellerRegistration" component={ResellerRegistration} />
+      <Stack.Screen name="ResellerDashboard" component={ResellerDashboard} />
+      <Stack.Screen name="CatalogShare" component={CatalogShare} />
+      <Stack.Screen name="ProductDetails" component={ProductDetails} />
+      <Stack.Screen name="Products" component={Products} />
+      <Stack.Screen name="OrderDetails" component={OrderDetails} />
+      <Stack.Screen name="Messages" component={MessagesScreen} />
+      <Stack.Screen name="ChatThread" component={ChatThread} />
+      <Stack.Screen name="FriendSearch" component={FriendSearch} />
     </Stack.Navigator>
   );
 };
@@ -107,57 +110,31 @@ const AuthFlowScreen = () => {
 
 const AuthNavigator = () => {
   return (
-    <Stack.Navigator initialRouteName="AuthFlow">
-      <Stack.Screen name="Intro" component={Intro} options={{ headerShown: false }} />
-      <Stack.Screen name="AuthFlow" component={AuthFlowScreen} options={{ headerShown: false }} />
-      <Stack.Screen name="Login" component={Login} options={{ headerShown: false }} />
-      <Stack.Screen name="UserOnboarding" component={UserOnboarding} options={{ headerShown: false }} />
+    <Stack.Navigator 
+      initialRouteName="AuthFlow"
+      screenOptions={{ 
+        headerShown: false,
+        animation: 'slide_from_right',
+        animationDuration: 250,
+        gestureEnabled: true,
+        fullScreenGestureEnabled: true,
+        customAnimationOnGesture: true,
+      }}
+    >
+      <Stack.Screen name="Intro" component={Intro} />
+      <Stack.Screen name="AuthFlow" component={AuthFlowScreen} />
+      <Stack.Screen name="Login" component={Login} />
+      <Stack.Screen name="UserOnboarding" component={UserOnboarding} />
       {/** Signup removed */}
-      <Stack.Screen
-        name="ProfilePictureUpload"
-        component={ProfilePictureUpload}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="UserSizeSelection"
-        component={UserSizeSelection}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="SkinToneSelection"
-        component={SkinToneSelection}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="BodyWidthSelection"
-        component={BodyWidthSelection}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="RegistrationSuccess"
-        component={RegistrationSuccess}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="ForgotPassword"
-        component={ForgotPassword}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="PrivacyPolicy"
-        component={PrivacyPolicy}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="TermsAndConditions"
-        component={TermsAndConditions}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="RefundPolicy"
-        component={RefundPolicy}
-        options={{ headerShown: false }}
-      />
+      <Stack.Screen name="ProfilePictureUpload" component={ProfilePictureUpload} />
+      <Stack.Screen name="UserSizeSelection" component={UserSizeSelection} />
+      <Stack.Screen name="SkinToneSelection" component={SkinToneSelection} />
+      <Stack.Screen name="BodyWidthSelection" component={BodyWidthSelection} />
+      <Stack.Screen name="RegistrationSuccess" component={RegistrationSuccess} />
+      <Stack.Screen name="ForgotPassword" component={ForgotPassword} />
+      <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicy} />
+      <Stack.Screen name="TermsAndConditions" component={TermsAndConditions} />
+      <Stack.Screen name="RefundPolicy" component={RefundPolicy} />
     </Stack.Navigator>
   );
 };
@@ -224,11 +201,16 @@ export default function RootStack() {
               screens: {
                 Home: 'home',
                 SharedCollection: 'shared-collection/:shareToken',
-                ProductDetails: 'product/:productId',
                 Products: 'products/:categoryId',
                 CollectionDetails: 'collection/:collectionId',
               },
             },
+          },
+        },
+        ProductDetails: {
+          path: 'product/:productId',
+          parse: {
+            productId: (productId: string) => productId,
           },
         },
       },

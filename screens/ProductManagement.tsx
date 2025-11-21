@@ -224,12 +224,14 @@ const ProductManagement = () => {
             cost_price,
             discount_percentage,
             image_urls,
-            video_urls,
-            color:colors(name, hex_code),
-            size:sizes(name)
+            video_urls
           )
         `)
         .order('created_at', { ascending: false });
+      
+      // Fetch colors and sizes separately
+      const { data: colorsData } = await supabase.from('colors').select('id, name, hex_code');
+      const { data: sizesData } = await supabase.from('sizes').select('id, name');
 
       if (error) {
         console.error('Error fetching products:', error);
@@ -237,12 +239,25 @@ const ProductManagement = () => {
         return;
       }
 
-      // Transform data to handle the new format
-      const transformedData = (data || []).map((product: any) => ({
-        ...product,
-        image_urls: product.image_urls || [],
-        video_urls: product.video_urls || [],
-      }));
+      // Transform data to handle the new format and join colors/sizes
+      const transformedData = (data || []).map((product: any) => {
+        const variants = (product.variants || []).map((variant: any) => {
+          const color = colorsData?.find(c => c.id === variant.color_id);
+          const size = sizesData?.find(s => s.id === variant.size_id);
+          return {
+            ...variant,
+            color: color ? { name: color.name, hex_code: color.hex_code } : null,
+            size: size ? { name: size.name } : null,
+          };
+        });
+        
+        return {
+          ...product,
+          image_urls: product.image_urls || [],
+          video_urls: product.video_urls || [],
+          variants,
+        };
+      });
 
       setProducts(transformedData);
     } catch (error) {

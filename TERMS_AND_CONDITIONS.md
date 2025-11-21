@@ -271,7 +271,7 @@ Available credit packages:
 ## 12. Intellectual Property Rights
 
 ### 12.1 App Ownership
-- **Only2U App** and its original content are owned by [Company Name]
+- **Only2U App** and its original content are owned by Only2U Fashion Private Limited
 - **AI models and algorithms** are proprietary technology
 - **Trademarks and logos** are protected intellectual property
 
@@ -337,7 +337,7 @@ These Terms are governed by the **laws of India**.
 
 ### 16.3 Legal Notices
 - **Email**: legal@only2u.com
-- **Address**: [Legal Department Address]
+- **Address**: Only2U Fashion Private Limited Legal Department, [Company Address], [City, State, ZIP]
 
 ---
 
@@ -357,4 +357,4 @@ These Terms, together with our Privacy Policy, constitute the entire agreement b
 
 ---
 
-*© 2024 Only2U. All rights reserved.*
+*© 2025 Only2U Fashion Private Limited. All rights reserved.*

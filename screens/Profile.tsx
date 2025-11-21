@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -13,8 +13,11 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  Linking,
+  Share,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useUser } from '~/contexts/UserContext';
@@ -22,19 +25,27 @@ import { useAuth } from '~/contexts/useAuth';
 import { useWishlist } from '~/contexts/WishlistContext';
 import { useLoginSheet } from '~/contexts/LoginSheetContext';
 import { supabase } from '~/utils/supabase';
-import { useTranslation } from 'react-i18next';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { ensureNewUserReferralCoupon, ensureReferrerRewardCoupon } from '~/services/referralCouponService';
+import { useTranslation } from 'react-i18next';
 import Toast from 'react-native-toast-message';
+import * as Clipboard from 'expo-clipboard';
 import * as ImagePicker from 'expo-image-picker';
-import { uploadProfilePhoto, validateImage } from '~/utils/profilePhotoUpload';
+import { Video, ResizeMode } from 'expo-av';
+import { uploadProfilePhoto, validateImage, deleteProfilePhoto as deleteProfilePhotoFromStorage } from '~/utils/profilePhotoUpload';
 
 type RootStackParamList = {
   TermsAndConditions: undefined;
   PrivacyPolicy: undefined;
   RefundPolicy: undefined;
+  VendorDashboard: undefined;
 };
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
+
+const PROFILE_PHOTO_TUTORIAL_KEY = 'ONLY2U_PROFILE_PHOTO_TUTORIAL_SEEN';
+const PROFILE_PHOTO_TUTORIAL_VIDEO =
+  'https://res.cloudinary.com/dtt75ypdv/video/upload/v1763566959/productvideos/profile-photo-tips.mp4';
 
 const Profile = () => {
   const navigation = useNavigation<NavigationProp>();
@@ -64,6 +75,32 @@ const Profile = () => {
   // Profile photo upload state
   const [showPhotoPickerModal, setShowPhotoPickerModal] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [permissionModal, setPermissionModal] = useState<{ visible: boolean; context: 'camera' | 'gallery' }>({
+    visible: false,
+    context: 'camera',
+  });
+  const [showDeletePhotoModal, setShowDeletePhotoModal] = useState(false);
+  const [deletingPhoto, setDeletingPhoto] = useState(false);
+  const [showReferralModal, setShowReferralModal] = useState(false);
+  const [referralLoading, setReferralLoading] = useState(false);
+  const [referralCode, setReferralCode] = useState<string>('');
+  const [referralCouponId, setReferralCouponId] = useState<string | null>(null);
+  const [referralStats, setReferralStats] = useState<{
+    totalFriends: number;
+    totalDiscount: number;
+    lastUsedAt: string | null;
+  }>({
+    totalFriends: 0,
+    totalDiscount: 0,
+    lastUsedAt: null,
+  });
+  const [referralCodeInput, setReferralCodeInput] = useState('');
+  const [referralCodeState, setReferralCodeState] = useState<'idle' | 'checking' | 'valid' | 'invalid'>('idle');
+  const [referralCodeMessage, setReferralCodeMessage] = useState('');
+  const [appliedReferralCoupon, setAppliedReferralCoupon] = useState<{ code: string; couponId: string; referrerId?: string | null } | null>(null);
+  const [showPhotoTutorialModal, setShowPhotoTutorialModal] = useState(false);
+  const [photoTutorialDontShowAgain, setPhotoTutorialDontShowAgain] = useState(false);
+  const [hasSeenPhotoTutorial, setHasSeenPhotoTutorial] = useState(false);
 
   // Sync user data from useAuth to useUser if userData is null but user has data
   useEffect(() => {
@@ -79,6 +116,18 @@ const Profile = () => {
     return () => clearInterval(timer);
   }, [resendIn]);
 
+  useEffect(() => {
+    const loadPhotoTutorialFlag = async () => {
+      try {
+        const stored = await AsyncStorage.getItem(PROFILE_PHOTO_TUTORIAL_KEY);
+        setHasSeenPhotoTutorial(stored === 'true');
+      } catch (error) {
+        console.warn('Failed to load profile photo tutorial preference', error);
+      }
+    };
+    loadPhotoTutorialFlag();
+  }, []);
+
 
   const handleBackPress = () => {
     navigation.goBack();
@@ -90,6 +139,14 @@ const Profile = () => {
 
   const handleMyOrders = () => {
     navigation.navigate('MyOrders' as never);
+  };
+
+  const handleResellerEarnings = () => {
+    navigation.navigate('ResellerDashboard' as never);
+  };
+
+  const handleAdminPanel = () => {
+    navigation.navigate('Admin' as never);
   };
 
   const handleBodyMeasurements = () => {
@@ -117,6 +174,10 @@ const Profile = () => {
     navigation.navigate('VendorProfile' as never);
   };
 
+  const handleVendorDashboard = () => {
+    navigation.navigate('VendorDashboard' as never);
+  };
+
   const handleJoinInfluencer = () => {
     navigation.navigate('JoinInfluencer' as never);
   };
@@ -128,6 +189,244 @@ const Profile = () => {
       [{ text: 'OK' }]
     );
   };
+
+  const generateReferralCode = useCallback(() => {
+    if (!userData?.id) return '';
+    const namePart = (userData?.name || 'ONLY2U')
+      .replace(/[^a-zA-Z0-9]/g, '')
+      .slice(0, 6)
+      .toUpperCase() || 'ONLY2U';
+    const idPart = userData.id.replace(/[^a-zA-Z0-9]/g, '').slice(-4).toUpperCase();
+    return `${namePart}${idPart}`;
+  }, [userData?.id, userData?.name]);
+
+  const parseReferralRewardMetadata = (description?: string | null) => {
+    if (!description) return { referralCount: 0, maxDiscount: 0 };
+    const parts = description.split('|');
+    const metaPart = parts.find((part) => part.startsWith('REFERRALS:'));
+    if (!metaPart) return { referralCount: 0, maxDiscount: 0 };
+    const [referralSection, maxSection] = metaPart.split(':MAX:');
+    const referralCount = Number(referralSection.replace('REFERRALS:', '')) || 0;
+    const maxDiscount = Number(maxSection) || 0;
+    return { referralCount, maxDiscount };
+  };
+
+  const loadReferralData = useCallback(async () => {
+    if (!userData?.id) return;
+
+    setReferralLoading(true);
+    try {
+      const code = generateReferralCode();
+      setReferralCode(code);
+
+      const { data: existingCoupon, error: couponFetchError } = await supabase
+        .from('coupons')
+        .select('id, code, is_active')
+        .eq('code', code)
+        .maybeSingle();
+
+      if (couponFetchError) {
+        throw couponFetchError;
+      }
+
+      let couponId = existingCoupon?.id ?? null;
+
+      if (!couponId) {
+        const { data: newCoupon, error: couponInsertError } = await supabase
+          .from('coupons')
+          .insert({
+            code,
+            description: `Referral invite from ${userData.name || 'Only2U customer'}`,
+            discount_type: 'fixed',
+            discount_value: 100,
+            max_uses: null,
+            per_user_limit: 1,
+            min_order_value: 0,
+            is_active: true,
+            created_by: userData.id,
+          })
+          .select('id')
+          .single();
+
+        if (couponInsertError) {
+          throw couponInsertError;
+        }
+
+        couponId = newCoupon.id;
+      }
+
+      setReferralCouponId(couponId);
+
+      const { data: usageData, error: usageError } = await supabase
+        .from('coupon_usage')
+        .select('id, discount_amount, used_at')
+        .eq('coupon_id', couponId)
+        .order('used_at', { ascending: false });
+
+      if (usageError) {
+        throw usageError;
+      }
+
+      console.log('📊 Referral stats loaded:', {
+        couponCode: code,
+        couponId,
+        usageCount: usageData?.length || 0,
+        usageData: usageData,
+      });
+
+      const totalDiscount =
+        usageData?.reduce((sum, usage) => sum + Number(usage.discount_amount || 0), 0) || 0;
+
+      const referralInviteUses = usageData?.length || 0;
+
+      const referralRewardCode = `REFREWARD${userData.id.slice(-8).toUpperCase()}`;
+      const { data: referralRewardCoupon } = await supabase
+        .from('coupons')
+        .select('id, description, max_discount_value')
+        .eq('code', referralRewardCode)
+        .maybeSingle();
+
+      const referralMetadata = parseReferralRewardMetadata(referralRewardCoupon?.description);
+      const totalFriends =
+        referralMetadata.referralCount > 0
+          ? referralMetadata.referralCount
+          : referralInviteUses;
+
+      setReferralStats({
+        totalFriends,
+        totalDiscount,
+        lastUsedAt: usageData && usageData.length > 0 ? usageData[0].used_at : null,
+      });
+    } catch (error) {
+      console.error('Error loading referral data:', error);
+      Toast.show({
+        type: 'error',
+        text1: 'Unable to load referral info',
+        text2: 'Please try again in a moment.',
+      });
+    } finally {
+      setReferralLoading(false);
+    }
+  }, [generateReferralCode, userData?.id, userData?.name]);
+
+  // Refresh referral stats whenever the referral modal becomes visible
+  useEffect(() => {
+    if (showReferralModal && userData?.id) {
+      loadReferralData();
+    }
+  }, [showReferralModal, userData?.id, loadReferralData]);
+
+  const handleReferAndEarnPress = async () => {
+    if (!userData?.id) {
+      Toast.show({
+        type: 'info',
+        text1: 'Login Required',
+        text2: 'Please log in to access referral rewards.',
+      });
+      handleLoginPress();
+      return;
+    }
+    setShowReferralModal(true);
+    await loadReferralData();
+  };
+
+  const handleShareReferral = async () => {
+    if (!referralCode) {
+      Toast.show({
+        type: 'info',
+        text1: 'Generating Code',
+        text2: 'Please wait while we prepare your referral code.',
+      });
+      return;
+    }
+
+    const message = `Hey! 🎁 Shop the latest trends on Only2U and get ₹100 off your first order.\nUse my referral code: ${referralCode}\n\nDownload the app: only2u.app and apply the code at checkout.`;
+    const whatsappUrl = `whatsapp://send?text=${encodeURIComponent(message)}`;
+    const whatsappWebUrl = `https://wa.me/?text=${encodeURIComponent(message)}`;
+
+    try {
+      await Linking.openURL(whatsappUrl);
+    } catch {
+      try {
+        await Linking.openURL(whatsappWebUrl);
+      } catch {
+        await Share.share({ message });
+      }
+    }
+  };
+
+  const handleCopyReferralCode = async () => {
+    if (!referralCode) return;
+    await Clipboard.setStringAsync(referralCode);
+    Toast.show({
+      type: 'success',
+      text1: 'Copied to clipboard',
+      text2: 'Referral code ready to share!',
+    });
+  };
+
+  const formatReferralDate = (value: string | null) => {
+    if (!value) return 'No usage yet';
+    try {
+      const date = new Date(value);
+      return date.toLocaleDateString('en-IN', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      });
+    } catch {
+      return 'Recently used';
+    }
+  };
+
+  const handleApplyReferralCodeInput = useCallback(async () => {
+    const trimmed = referralCodeInput.trim().toUpperCase();
+    if (!trimmed) {
+      setReferralCodeState('invalid');
+      setReferralCodeMessage('Enter a referral code to apply.');
+      setAppliedReferralCoupon(null);
+      return;
+    }
+
+    setReferralCodeState('checking');
+    setReferralCodeMessage('');
+
+    try {
+      const { data, error } = await supabase
+        .from('coupons')
+        .select('id, code, is_active, discount_type, discount_value, created_by')
+        .eq('code', trimmed)
+        .eq('is_active', true)
+        .maybeSingle();
+
+      if (error || !data) {
+        setReferralCodeState('invalid');
+        setReferralCodeMessage('Invalid or inactive referral code.');
+        setAppliedReferralCoupon(null);
+        return;
+      }
+
+      if (data.discount_type !== 'fixed' || Number(data.discount_value) < 100) {
+        setReferralCodeState('invalid');
+        setReferralCodeMessage('This code is not eligible for referral discount.');
+        setAppliedReferralCoupon(null);
+        return;
+      }
+
+      setReferralCodeState('valid');
+      setReferralCodeMessage('Referral code applied! You will see ₹100 off on your first order.');
+      setAppliedReferralCoupon({ 
+        code: trimmed, 
+        couponId: data.id,
+        referrerId: data.created_by || null 
+      });
+    } catch (error) {
+      console.error('Referral code apply error:', error);
+      setReferralCodeState('invalid');
+      setReferralCodeMessage('Unable to verify referral code. Please try again.');
+      setAppliedReferralCoupon(null);
+    }
+  }, [referralCodeInput]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -218,6 +517,10 @@ const Profile = () => {
     setVerifying(false);
     setOtpSent(false);
     setResendIn(0);
+    setReferralCodeInput('');
+    setReferralCodeState('idle');
+    setReferralCodeMessage('');
+    setAppliedReferralCoupon(null);
   };
 
   const handleSendOtp = async () => {
@@ -324,8 +627,29 @@ const Profile = () => {
         setCreatingProfile(false);
         return;
       }
+      if (appliedReferralCoupon) {
+        try {
+          await ensureNewUserReferralCoupon(authUser.id);
+
+          Toast.show({
+            type: 'success',
+            text1: 'Referral saved',
+            text2: '₹100 off coupon added to your account.',
+          });
+
+          if (appliedReferralCoupon.referrerId) {
+            await ensureReferrerRewardCoupon(appliedReferralCoupon.referrerId);
+          }
+        } catch (couponError) {
+          console.error('Error syncing referral coupons:', couponError);
+        }
+      }
       setShowOnboarding(false);
       setName('');
+      setReferralCodeInput('');
+      setReferralCodeState('idle');
+      setReferralCodeMessage('');
+      setAppliedReferralCoupon(null);
     } catch (e: any) {
       setError(e?.message || 'Failed to create profile');
     } finally {
@@ -334,19 +658,21 @@ const Profile = () => {
   };
 
   const handleLoginPress = () => {
-    showLoginSheet();
-    resetSheetState();
+    console.log('Login button pressed');
+    try {
+      showLoginSheet();
+      resetSheetState();
+      console.log('Login sheet should be visible now:', isLoginSheetVisible);
+    } catch (error) {
+      console.error('Error showing login sheet:', error);
+    }
   };
 
   // Profile photo upload functions
   const requestCameraPermissions = async () => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert(
-        'Camera Permission Required',
-        'Please grant camera permissions to take a profile picture.',
-        [{ text: 'OK' }]
-      );
+      setPermissionModal({ visible: true, context: 'camera' });
       return false;
     }
     return true;
@@ -355,11 +681,7 @@ const Profile = () => {
   const requestGalleryPermissions = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert(
-        'Gallery Permission Required',
-        'Please grant gallery permissions to select a profile picture.',
-        [{ text: 'OK' }]
-      );
+      setPermissionModal({ visible: true, context: 'gallery' });
       return false;
     }
     return true;
@@ -397,6 +719,78 @@ const Profile = () => {
       await handlePhotoUpload(result.assets[0].uri);
     }
     setShowPhotoPickerModal(false);
+  };
+
+  const closePermissionModal = () => setPermissionModal(prev => ({ ...prev, visible: false }));
+
+  const openSettingsForPermissions = async () => {
+    closePermissionModal();
+    try {
+      if (Linking.openSettings) {
+        await Linking.openSettings();
+      } else {
+        await Linking.openURL('app-settings:');
+      }
+    } catch (error) {
+      console.warn('Unable to open settings:', error);
+    }
+  };
+
+  const removeProfilePhoto = async () => {
+    if (!userData?.id || !userData?.profilePhoto) return false;
+
+    try {
+      setDeletingPhoto(true);
+
+      const deleted = await deleteProfilePhotoFromStorage(userData.profilePhoto);
+      if (!deleted) {
+        throw new Error('Failed to remove photo from storage');
+      }
+
+      const { error: updateError } = await supabase
+        .from('users')
+        .update({ profilePhoto: null })
+        .eq('id', userData.id);
+
+      if (updateError) {
+        throw updateError;
+      }
+
+      setUserData({ ...userData, profilePhoto: null });
+      await refreshUserData();
+
+      Toast.show({
+        type: 'success',
+        text1: 'Photo Removed',
+        text2: 'Your profile photo has been deleted.',
+      });
+
+      return true;
+    } catch (error) {
+      console.error('Error deleting profile photo:', error);
+      Toast.show({
+        type: 'error',
+        text1: 'Unable to Delete',
+        text2: 'Something went wrong while removing your photo. Please try again.',
+      });
+      return false;
+    } finally {
+      setDeletingPhoto(false);
+    }
+  };
+
+  const handleDeleteProfilePhoto = () => {
+    if (!userData?.profilePhoto) {
+      Toast.show({
+        type: 'info',
+        text1: 'No Photo Found',
+        text2: 'You do not have a profile photo to remove.',
+      });
+      return;
+    }
+
+    setShowPhotoPickerModal(false);
+    setShowDeletePhotoModal(true);
   };
 
   const handlePhotoUpload = async (uri: string) => {
@@ -464,7 +858,7 @@ const Profile = () => {
     }
   };
 
-  const handlePhotoPress = () => {
+  const handlePhotoPress = async () => {
     if (!userData?.id) {
       Toast.show({
         type: 'info',
@@ -473,11 +867,17 @@ const Profile = () => {
       });
       return;
     }
+
+    if (!hasSeenPhotoTutorial) {
+      setShowPhotoTutorialModal(true);
+      return;
+    }
+
     setShowPhotoPickerModal(true);
   };
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={handleBackPress} style={styles.backButton}>
@@ -546,6 +946,8 @@ const Profile = () => {
                 <TouchableOpacity 
                   style={styles.loginButton}
                   onPress={handleLoginPress}
+                  activeOpacity={0.7}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                 >
                   <Ionicons name="log-in-outline" size={20} color="#fff" />
                   <Text style={styles.loginButtonText}>Login</Text>
@@ -555,6 +957,27 @@ const Profile = () => {
           )}
         </View>
 
+        {/* Refer & Earn */}
+        <TouchableOpacity
+          style={styles.referCard}
+          onPress={handleReferAndEarnPress}
+          activeOpacity={0.85}
+        >
+          <View style={styles.referIconCircle}>
+            <Ionicons name="gift" size={22} color="#F53F7A" />
+          </View>
+          <View style={styles.referTextBlock}>
+            <Text style={styles.referCardTitle}>Refer & Earn</Text>
+            <Text style={styles.referCardSubtitle}>
+              Share your code, friends get ₹100 off
+            </Text>
+          </View>
+          <View style={styles.referRewardPill}>
+            <Ionicons name="share-social-outline" size={16} color="#F53F7A" />
+            <Text style={styles.referRewardText}>Invite</Text>
+          </View>
+        </TouchableOpacity>
+
         {/* Menu Items */}
         <View style={styles.menuContainer}>
           {/* New red actions */}
@@ -562,6 +985,12 @@ const Profile = () => {
             <Ionicons name="storefront-outline" size={24} color="red" />
             <Text style={[styles.menuText, { color: 'red' }]}>Become a Seller</Text>
             <Ionicons name="chevron-forward" size={20} color="red" />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.menuItem} onPress={handleVendorDashboard}>
+            <Ionicons name="bar-chart-outline" size={24} color="#F53F7A" />
+            <Text style={[styles.menuText, { color: '#F53F7A' }]}>Vendor Dashboard</Text>
+            <Ionicons name="chevron-forward" size={20} color="#F53F7A" />
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.menuItem} onPress={handleJoinInfluencer}>
@@ -602,6 +1031,28 @@ const Profile = () => {
             <Text style={styles.menuText}>{t('my_orders')}</Text>
             <Ionicons name="chevron-forward" size={20} color="#999" />
           </TouchableOpacity>
+
+          <TouchableOpacity style={styles.menuItem} onPress={handleResellerEarnings}>
+            <View style={styles.menuItemIconCircle}>
+              <MaterialCommunityIcons name="currency-inr" size={20} color="#F53F7A" />
+            </View>
+            <View style={styles.menuItemTextContainer}>
+              <Text style={styles.menuItemTitle}>Reseller Earnings</Text>
+              <Text style={styles.menuItemSubtitle}>
+                View commissions and payouts from reseller orders
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color="#C7C7CC" />
+          </TouchableOpacity>
+
+          {/* Admin Panel - Only visible for admin users */}
+          {((userData || user)?.user_type === 'admin') && (
+            <TouchableOpacity style={styles.menuItem} onPress={handleAdminPanel}>
+              <Ionicons name="settings-outline" size={24} color="#FF6B35" />
+              <Text style={[styles.menuText, { color: '#FF6B35' }]}>Admin Panel</Text>
+              <Ionicons name="chevron-forward" size={20} color="#FF6B35" />
+            </TouchableOpacity>
+          )}
 
           <TouchableOpacity style={styles.menuItem} onPress={handleHelpCenter}>
             <Ionicons name="help-circle-outline" size={24} color="#333" />
@@ -648,9 +1099,84 @@ const Profile = () => {
         {/* Footer */}
         <View style={styles.footer}>
           <Text style={styles.footerText}>Only2U v1.0.2</Text>
-          <Text style={styles.footerText}>© 2025 Only2U Fashion</Text>
+          <Text style={styles.footerText}>© 2025 Only2U Fashion Private Limited</Text>
         </View>
       </ScrollView>
+
+      {/* Referral Modal */}
+      <Modal
+        visible={showReferralModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowReferralModal(false)}
+      >
+        <View style={styles.referralOverlay}>
+          <View style={styles.referralContainer}>
+            <View style={styles.referralHeader}>
+              <View style={styles.referralHeaderIcon}>
+                <Ionicons name="sparkles-outline" size={22} color="#F53F7A" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.referralTitle}>Invite & Earn</Text>
+                <Text style={styles.referralSubtitle}>Friends get ₹100 off on their first order</Text>
+              </View>
+              <TouchableOpacity onPress={() => setShowReferralModal(false)}>
+                <Ionicons name="close" size={20} color="#6B7280" />
+              </TouchableOpacity>
+            </View>
+
+            {referralLoading ? (
+              <View style={styles.referralLoading}>
+                <ActivityIndicator size="large" color="#F53F7A" />
+                <Text style={styles.referralLoadingText}>Preparing your invite...</Text>
+              </View>
+            ) : (
+              <>
+                <View style={styles.referralCodeCard}>
+                  <View>
+                    <Text style={styles.referralCodeLabel}>Your code</Text>
+                    <Text style={styles.referralCodeValue}>{referralCode || '— — —'}</Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.copyButton}
+                    onPress={handleCopyReferralCode}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="copy-outline" size={18} color="#F53F7A" />
+                    <Text style={styles.copyButtonText}>Copy</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View style={styles.referralStatsContainer}>
+                  <View style={styles.referralStat}>
+                    <Text style={styles.referralStatValue}>{referralStats.totalFriends}</Text>
+                    <Text style={styles.referralStatLabel}>Friends Joined</Text>
+                  </View>
+                  <View style={styles.referralStat}>
+                    <Text style={styles.referralStatValue}>₹{referralStats.totalDiscount.toFixed(0)}</Text>
+                    <Text style={styles.referralStatLabel}>Total Savings Shared</Text>
+                  </View>
+                  <View style={styles.referralStat}>
+                    <Text style={styles.referralStatValue}>
+                      {formatReferralDate(referralStats.lastUsedAt)}
+                    </Text>
+                    <Text style={styles.referralStatLabel}>Last used</Text>
+                  </View>
+                </View>
+
+                <TouchableOpacity
+                  style={styles.whatsappButton}
+                  onPress={handleShareReferral}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons name="logo-whatsapp" size={20} color="#fff" />
+                  <Text style={styles.whatsappButtonText}>Share on WhatsApp</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
 
       <Modal
         visible={showDeleteModal}
@@ -748,6 +1274,74 @@ const Profile = () => {
                     returnKeyType='done'
                     maxLength={15}
                   />
+                </View>
+
+                <View style={{ marginTop: 16 }}>
+                  <Text style={{ fontSize: 12, color: '#666', marginBottom: 6, fontWeight: '700', letterSpacing: 0.2 }}>
+                    Have a referral code? (optional)
+                  </Text>
+                  <View
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      backgroundColor: '#F4F5F7',
+                      borderRadius: 14,
+                      paddingHorizontal: 12,
+                      borderWidth: 1,
+                      borderColor:
+                        referralCodeState === 'valid'
+                          ? '#A7F3D0'
+                          : referralCodeState === 'invalid'
+                          ? '#FECACA'
+                          : '#EAECF0',
+                    }}
+                  >
+                    <TextInput
+                      value={referralCodeInput}
+                      onChangeText={(text) => {
+                        setReferralCodeInput(text.toUpperCase());
+                        if (referralCodeState !== 'idle') {
+                          setReferralCodeState('idle');
+                          setReferralCodeMessage('');
+                          setAppliedReferralCoupon(null);
+                        }
+                      }}
+                      placeholder="ENTER CODE"
+                      placeholderTextColor="#9CA3AF"
+                      style={{ flex: 1, fontSize: 14, color: '#111', paddingVertical: Platform.OS === 'android' ? 10 : 14 }}
+                      autoCapitalize="characters"
+                    />
+                    <TouchableOpacity
+                      style={{
+                        paddingHorizontal: 14,
+                        paddingVertical: 8,
+                        backgroundColor: referralCodeState === 'valid' ? '#10B981' : '#F53F7A',
+                        borderRadius: 12,
+                        marginLeft: 8,
+                      }}
+                      onPress={handleApplyReferralCodeInput}
+                      disabled={referralCodeState === 'checking'}
+                    >
+                      {referralCodeState === 'checking' ? (
+                        <ActivityIndicator color="#fff" size="small" />
+                      ) : (
+                        <Text style={{ color: '#fff', fontWeight: '700' }}>
+                          {referralCodeState === 'valid' ? 'Applied' : 'Apply'}
+                        </Text>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                  {!!referralCodeMessage && (
+                    <Text
+                      style={{
+                        marginTop: 6,
+                        fontSize: 12,
+                        color: referralCodeState === 'valid' ? '#047857' : '#B91C1C',
+                      }}
+                    >
+                      {referralCodeMessage}
+                    </Text>
+                  )}
                 </View>
 
                 {/* Primary CTA send/resend */}
@@ -851,6 +1445,87 @@ const Profile = () => {
 
       {/* Photo Picker Modal */}
       <Modal
+        visible={showPhotoTutorialModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowPhotoTutorialModal(false)}
+      >
+        <View style={styles.photoTutorialOverlay}>
+          <View style={styles.photoTutorialCard}>
+            <View style={styles.photoTutorialHeader}>
+              <View style={styles.photoTutorialIcon}>
+                <Ionicons name="sparkles-outline" size={22} color="#F53F7A" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.photoTutorialTitle}>Perfect Profile Photo Tips</Text>
+                <Text style={styles.photoTutorialSubtitle}>
+                  Follow these simple steps for a clear, beautiful profile picture.
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setShowPhotoTutorialModal(false)}>
+                <Ionicons name="close" size={20} color="#9CA3AF" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.photoTutorialVideoWrapper}>
+              <Video
+                source={{ uri: PROFILE_PHOTO_TUTORIAL_VIDEO }}
+                style={styles.photoTutorialVideo}
+                resizeMode={ResizeMode.COVER}
+                shouldPlay
+                useNativeControls
+                isLooping
+              />
+            </View>
+
+            <Text style={styles.photoTutorialDescription}>
+              Use good lighting, keep your face centered, and avoid heavy filters. This helps us
+              match you with the right products and virtual try-ons.
+            </Text>
+
+            <TouchableOpacity
+              style={styles.photoTutorialCheckboxRow}
+              onPress={() => setPhotoTutorialDontShowAgain(!photoTutorialDontShowAgain)}
+              activeOpacity={0.8}
+            >
+              <View
+                style={[
+                  styles.photoTutorialCheckbox,
+                  photoTutorialDontShowAgain && styles.photoTutorialCheckboxChecked,
+                ]}
+              >
+                {photoTutorialDontShowAgain && (
+                  <Ionicons name="checkmark" size={14} color="#fff" />
+                )}
+              </View>
+              <Text style={styles.photoTutorialCheckboxText}>Do not show again</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.photoTutorialPrimaryBtn}
+              onPress={async () => {
+                try {
+                  if (photoTutorialDontShowAgain) {
+                    await AsyncStorage.setItem(PROFILE_PHOTO_TUTORIAL_KEY, 'true');
+                    setHasSeenPhotoTutorial(true);
+                  }
+                } catch (error) {
+                  console.warn('Failed to save tutorial preference', error);
+                } finally {
+                  setShowPhotoTutorialModal(false);
+                  setPhotoTutorialDontShowAgain(false);
+                  setTimeout(() => setShowPhotoPickerModal(true), 200);
+                }
+              }}
+            >
+              <Text style={styles.photoTutorialPrimaryText}>Start Upload</Text>
+              <Ionicons name="arrow-forward" size={18} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
         visible={showPhotoPickerModal}
         transparent
         animationType="slide"
@@ -901,6 +1576,28 @@ const Profile = () => {
               <Ionicons name="chevron-forward" size={20} color="#999" />
             </TouchableOpacity>
 
+            {userData?.profilePhoto && (
+              <TouchableOpacity 
+                style={styles.photoPickerOption}
+                onPress={handleDeleteProfilePhoto}
+                activeOpacity={0.7}
+                disabled={deletingPhoto}
+              >
+                <View style={styles.photoPickerOptionIcon}>
+                  <Ionicons name="trash" size={24} color="#fff" />
+                </View>
+                <View style={styles.photoPickerOptionTextContainer}>
+                  <Text style={styles.photoPickerOptionTitle}>
+                    {deletingPhoto ? 'Removing...' : 'Remove Photo'}
+                  </Text>
+                  <Text style={styles.photoPickerOptionSubtitle}>
+                    Revert to your default avatar
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color="#F53F7A" />
+              </TouchableOpacity>
+            )}
+
             <TouchableOpacity 
               style={styles.cancelButton}
               onPress={() => setShowPhotoPickerModal(false)}
@@ -911,7 +1608,107 @@ const Profile = () => {
           </View>
         </View>
       </Modal>
-    </View>
+
+      <Modal
+        visible={permissionModal.visible}
+        transparent
+        animationType="fade"
+        onRequestClose={closePermissionModal}
+      >
+        <View style={styles.permissionOverlay}>
+          <View style={styles.permissionModal}>
+            <View style={styles.permissionIconCircle}>
+              <Ionicons
+                name={permissionModal.context === 'camera' ? 'camera' : 'images'}
+                size={28}
+                color="#F53F7A"
+              />
+            </View>
+            <Text style={styles.permissionTitle}>
+              {permissionModal.context === 'camera'
+                ? 'Camera Access Needed'
+                : 'Photo Library Access Needed'}
+            </Text>
+            <Text style={styles.permissionBody}>
+              {permissionModal.context === 'camera'
+                ? 'Allow Only2U to use your camera to capture a fresh profile photo.'
+                : 'Allow Only2U to access your library so you can pick a profile photo.'}
+            </Text>
+            <View style={styles.permissionActions}>
+              <TouchableOpacity
+                style={styles.permissionSecondaryButton}
+                onPress={closePermissionModal}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.permissionSecondaryText}>Not Now</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.permissionPrimaryButton}
+                onPress={openSettingsForPermissions}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="settings" size={16} color="#fff" style={{ marginRight: 6 }} />
+                <Text style={styles.permissionPrimaryText}>Open Settings</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showDeletePhotoModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (!deletingPhoto) setShowDeletePhotoModal(false);
+        }}
+      >
+        <View style={styles.permissionOverlay}>
+          <View style={styles.permissionModal}>
+            <View style={[styles.permissionIconCircle, { backgroundColor: '#FEE2F2' }]}>
+              <Ionicons name="trash" size={26} color="#F53F7A" />
+            </View>
+            <Text style={styles.permissionTitle}>Remove Profile Photo?</Text>
+            <Text style={styles.permissionBody}>
+              This will reset your avatar to the default placeholder. You can upload a new photo anytime.
+            </Text>
+            <View style={styles.permissionActions}>
+              <TouchableOpacity
+                style={styles.permissionSecondaryButton}
+                onPress={() => {
+                  if (!deletingPhoto) setShowDeletePhotoModal(false);
+                }}
+                activeOpacity={0.8}
+                disabled={deletingPhoto}
+              >
+                <Text style={styles.permissionSecondaryText}>Keep Photo</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.permissionPrimaryButton}
+                onPress={async () => {
+                  if (deletingPhoto) return;
+                  const success = await removeProfilePhoto();
+                  if (success) {
+                    setShowDeletePhotoModal(false);
+                  }
+                }}
+                activeOpacity={0.8}
+                disabled={deletingPhoto}
+              >
+                {deletingPhoto ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <>
+                    <Ionicons name="checkmark-circle" size={16} color="#fff" style={{ marginRight: 6 }} />
+                    <Text style={styles.permissionPrimaryText}>Remove Photo</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </SafeAreaView>
   );
 };
 
@@ -925,8 +1722,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     // justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingTop: 50,
-    paddingBottom: 12,
+    paddingVertical: 12,
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
@@ -1181,6 +1977,64 @@ const styles = StyleSheet.create({
     textAlign: 'left',
     marginBottom: 16,
   },
+  referCard: {
+    marginHorizontal: 16,
+    marginTop: 16,
+    marginBottom: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    borderRadius: 18,
+    backgroundColor: '#FFF7FB',
+    flexDirection: 'row',
+    alignItems: 'center',
+    shadowColor: '#F53F7A',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    elevation: 2,
+    borderWidth: 1,
+    borderColor: '#FFE4EF',
+  },
+  referIconCircle: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#FFE1EC',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 14,
+  },
+  referTextBlock: {
+    flex: 1,
+  },
+  referCardTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  referCardSubtitle: {
+    fontSize: 13,
+    color: '#6B7280',
+    marginTop: 2,
+  },
+  referRewardPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#fff',
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: '#FECFE3',
+  },
+  referRewardText: {
+    color: '#F53F7A',
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
   loginButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1299,6 +2153,327 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#374151',
+  },
+  photoTutorialOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  photoTutorialCard: {
+    width: '100%',
+    backgroundColor: '#fff',
+    borderRadius: 24,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 18,
+    elevation: 8,
+  },
+  photoTutorialHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 12,
+  },
+  photoTutorialIcon: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: '#FFE3EF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  photoTutorialTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  photoTutorialSubtitle: {
+    fontSize: 13,
+    color: '#6B7280',
+    marginTop: 2,
+  },
+  photoTutorialVideoWrapper: {
+    width: '100%',
+    aspectRatio: 9 / 16,
+    borderRadius: 20,
+    overflow: 'hidden',
+    backgroundColor: '#000',
+    marginBottom: 12,
+  },
+  photoTutorialVideo: {
+    width: '100%',
+    height: '100%',
+  },
+  photoTutorialDescription: {
+    fontSize: 14,
+    color: '#374151',
+    lineHeight: 20,
+    marginBottom: 12,
+  },
+  photoTutorialCheckboxRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  photoTutorialCheckbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#F53F7A',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  photoTutorialCheckboxChecked: {
+    backgroundColor: '#F53F7A',
+  },
+  photoTutorialCheckboxText: {
+    fontSize: 14,
+    color: '#0F172A',
+    fontWeight: '600',
+  },
+  photoTutorialPrimaryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    borderRadius: 14,
+    backgroundColor: '#F53F7A',
+    shadowColor: '#F53F7A',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  photoTutorialPrimaryText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  permissionOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  permissionModal: {
+    width: '100%',
+    maxWidth: 360,
+    borderRadius: 24,
+    backgroundColor: '#fff',
+    paddingHorizontal: 24,
+    paddingVertical: 28,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 16 },
+    shadowOpacity: 0.2,
+    shadowRadius: 32,
+    elevation: 12,
+  },
+  permissionIconCircle: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: '#FEE2F2',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+  },
+  permissionTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#111827',
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  permissionBody: {
+    fontSize: 14,
+    color: '#4B5563',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 24,
+  },
+  permissionActions: {
+    flexDirection: 'row',
+    width: '100%',
+    gap: 12,
+  },
+  permissionSecondaryButton: {
+    flex: 1,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  permissionSecondaryText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#6B7280',
+  },
+  permissionPrimaryButton: {
+    flex: 1,
+    borderRadius: 14,
+    backgroundColor: '#F53F7A',
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    shadowColor: '#F53F7A',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  permissionPrimaryText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  referralOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  referralContainer: {
+    width: '100%',
+    backgroundColor: '#fff',
+    borderRadius: 24,
+    padding: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 18,
+    elevation: 8,
+  },
+  referralHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    marginBottom: 18,
+  },
+  referralHeaderIcon: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: '#FFE7F0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  referralTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  referralSubtitle: {
+    fontSize: 13,
+    color: '#6B7280',
+    marginTop: 2,
+  },
+  referralLoading: {
+    alignItems: 'center',
+    paddingVertical: 40,
+    gap: 12,
+  },
+  referralLoadingText: {
+    color: '#6B7280',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  referralCodeCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1.5,
+    borderColor: '#FBCFE8',
+    borderRadius: 18,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    backgroundColor: '#FFF8FB',
+    marginBottom: 16,
+  },
+  referralCodeLabel: {
+    fontSize: 12,
+    color: '#9CA3AF',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    fontWeight: '700',
+  },
+  referralCodeValue: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: '#F53F7A',
+    letterSpacing: 1.5,
+    marginTop: 4,
+  },
+  copyButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: '#FECFE3',
+    borderRadius: 999,
+    backgroundColor: '#fff',
+  },
+  copyButtonText: {
+    color: '#F53F7A',
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  referralStatsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 20,
+  },
+  referralStat: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#F3F4F6',
+    borderRadius: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    backgroundColor: '#FDF2F8',
+  },
+  referralStatValue: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#0F172A',
+    textAlign: 'center',
+  },
+  referralStatLabel: {
+    fontSize: 11,
+    color: '#6B7280',
+    marginTop: 4,
+    textAlign: 'center',
+  },
+  whatsappButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#25D366',
+    borderRadius: 16,
+    paddingVertical: 14,
+  },
+  whatsappButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
   },
 });
 

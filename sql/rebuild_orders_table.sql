@@ -12,7 +12,7 @@ CREATE TABLE orders (
   status VARCHAR(50) DEFAULT 'pending',
   payment_status VARCHAR(50) DEFAULT 'pending',
   payment_method VARCHAR(50),
-  payment_id TEXT, -- For storing razorpay payment ID or other payment references
+  payment_id TEXT, -- For storing payment ID or other payment references
   
   -- Amounts
   total_amount DECIMAL(10,2) DEFAULT 0,
@@ -129,14 +129,25 @@ CREATE POLICY "Admins can manage all order items" ON order_items
     )
   );
 
+-- Create sequence for incremental order numbers
+DROP SEQUENCE IF EXISTS order_number_seq;
+CREATE SEQUENCE order_number_seq START 1;
+
 -- Function to generate order number
 CREATE OR REPLACE FUNCTION generate_order_number()
 RETURNS TRIGGER AS $$
+DECLARE
+  new_order_num TEXT;
 BEGIN
-  IF NEW.order_number IS NULL THEN
-    NEW.order_number := 'ORD-' || TO_CHAR(NOW(), 'YYYYMMDD') || '-' ||
-                       LPAD((FLOOR(RANDOM() * 10000))::TEXT, 4, '0');
+  -- Only generate if order_number is NULL or empty
+  IF NEW.order_number IS NULL OR NEW.order_number = '' THEN
+    -- Generate order number: ORD-YYYYMMDD-001, ORD-YYYYMMDD-002, etc.
+    new_order_num := 'ORD-' || TO_CHAR(NOW(), 'YYYYMMDD') || '-' || 
+                     LPAD(nextval('order_number_seq')::TEXT, 3, '0');
+    
+    NEW.order_number := new_order_num;
   END IF;
+  
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -169,5 +180,5 @@ COMMENT ON TABLE orders IS 'Main orders table with flexible schema for various o
 COMMENT ON TABLE order_items IS 'Individual line items for each order';
 COMMENT ON COLUMN orders.status IS 'Order status: pending, confirmed, processing, shipped, delivered, cancelled, etc.';
 COMMENT ON COLUMN orders.payment_status IS 'Payment status: pending, paid, failed, refunded, etc.';
-COMMENT ON COLUMN orders.payment_method IS 'Payment method: cod, razorpay, upi, card, etc.';
+COMMENT ON COLUMN orders.payment_method IS 'Payment method: cod, etc.';
 
